@@ -118,6 +118,17 @@ void draw_bitmap_string(float x, float y, void *font, std::string text)
     glutBitmapString(font, (const unsigned char*)text.c_str());
 }
 
+void draw_plus(float x, float y)
+{
+    glBegin(GL_LINES);
+        glVertex2f(x - 4, y);
+        glVertex2f(x + 4, y);
+
+        glVertex2f(x, y - 4);
+        glVertex2f(x, y + 4);
+    glEnd();
+}
+
 void map_info_text_toggle()
 {
     if (map_draw_info_text == true)
@@ -597,13 +608,7 @@ void render()
 
         glColor3ub(map_point.r, map_point.g, map_point.b);
 
-        glBegin(GL_LINES);
-            glVertex2f(point_map_x, point_map_y - 4);
-            glVertex2f(point_map_x, point_map_y + 5);
-
-            glVertex2f(point_map_x - 4, point_map_y);
-            glVertex2f(point_map_x + 5, point_map_y);
-        glEnd();
+        draw_plus(point_map_x, point_map_y);
 
         draw_bitmap_string(point_map_x, point_map_y + (font_size * 1.5), font_name, map_point.text);
 
@@ -647,13 +652,7 @@ void render()
     float origin_map_x = map_origin_x + (map_offset_x / map_zoom);
     float origin_map_y = map_origin_y + (map_offset_y / map_zoom);
 
-    glBegin(GL_LINES);
-        glVertex2f(origin_map_x, origin_map_y - 4);
-        glVertex2f(origin_map_x, origin_map_y + 5);
-
-        glVertex2f(origin_map_x - 4, origin_map_y);
-        glVertex2f(origin_map_x + 5, origin_map_y);
-    glEnd();
+    draw_plus(origin_map_x, origin_map_y);
 
     draw_bitmap_string(origin_map_x, origin_map_y + (font_size * 1.5), font_name, "Origin (0, 0)");
 
