@@ -25,6 +25,10 @@ int window_id = 0;
 int window_width  = 640;
 int window_height = 480;
 
+std::string map_filename;
+
+std::vector<std::string> maps;
+
 float map_origin_x = window_width  / 2;
 float map_origin_y = window_height / 2;
 
@@ -43,6 +47,8 @@ float map_offset_multiplier = 10.0;
 
 float map_draw_x = 0;
 float map_draw_y = 0;
+
+bool map_draw_info_text = true;
 
 void *font_name = GLUT_BITMAP_HELVETICA_10;
 
@@ -112,6 +118,18 @@ void draw_bitmap_string(float x, float y, void *font, std::string text)
     glutBitmapString(font, (const unsigned char*)text.c_str());
 }
 
+void map_info_text_toggle()
+{
+    if (map_draw_info_text == true)
+    {
+        map_draw_info_text = false;
+    }
+    else
+    {
+        map_draw_info_text = true;
+    }
+}
+
 void map_center()
 {
     map_offset_x = 0;
@@ -153,12 +171,8 @@ void map_zoom_out()
     map_zoom += map_zoom_multiplier * map_zoom;
 }
 
-void parse()
+void parse(std::string map_filename)
 {
-    boost::property_tree::ptree pt;
-    boost::property_tree::ini_parser::read_ini(ini_file, pt);
-    std::string map_filename = pt.get<std::string>("Map.Filename");
-
     std::stringstream buffer;
     buffer << map_filename << " - eqmap";
 
@@ -166,6 +180,14 @@ void parse()
 
     std::fstream file;
     file.open(map_filename.c_str(), std::ios::in);
+
+    if (!file.is_open())
+    {
+        return;
+    }
+
+    map_lines.clear();
+    map_points.clear();
 
     std::string line;
     std::vector<std::string> line_data;
@@ -195,10 +217,12 @@ void parse()
                 continue;
             }
 
+/*
             foreach (std::string line_data_value, line_data)
             {
-                //std::cout << "line_data_value: " << line_data_value << std::endl;
+                std::cout << "line_data_value: " << line_data_value << std::endl;
             }
+*/
 
             if (line_type == 'L')
             {
@@ -242,12 +266,13 @@ void parse()
         }
     }
 
-    foreach (map_line_t map_line, map_lines)
-    {
-        //std::cout << "r" << map_line.r << "g" << map_line.g << "b" << map_line.b << std::endl;
-    }
-
     file.close();
+
+    map_origin_x = window_width  / 2;
+    map_origin_y = window_height / 2;
+
+    map_zoom_reset();
+    map_center();
 }
 
 void keyboard(unsigned char key, int x, int y)
@@ -268,24 +293,60 @@ void keyboard(unsigned char key, int x, int y)
             map_center();
             break;
 
-        case 56: // Numpad 8
+        case 119: // w
             map_scroll_up();
             break;
 
-        case 50: // Numpad 2
+        case 115: // s
             map_scroll_down();
             break;
 
-        case 52: // Numpad 4
+        case 97:  // a
             map_scroll_left();
             break;
 
-        case 54: // Numpad 6
+        case 100: // d
             map_scroll_right();
             break;
 
-        case 53: // Numpad 5
+        case 48: // 0
             map_center();
+            break;
+
+        case 49: // 1
+            map_zoom = 1.0;
+            break;
+
+        case 50: // 2
+            map_zoom = 2.0;
+            break;
+
+        case 51: // 3
+            map_zoom = 3.0;
+            break;
+
+        case 52: // 4
+            map_zoom = 4.0;
+            break;
+
+        case 53: // 5
+            map_zoom = 5.0;
+            break;
+
+        case 54: // 6
+            map_zoom = 6.0;
+            break;
+
+        case 55: // 7
+            map_zoom = 7.0;
+            break;
+
+        case 56: // 8
+            map_zoom = 8.0;
+            break;
+
+        case 57: // 9
+            map_zoom = 9.0;
             break;
 
         case 13: // Enter
@@ -309,6 +370,31 @@ void hotkeys(int key, int x, int y)
 {
     switch (key)
     {
+        case GLUT_KEY_F1:
+            parse(maps.at(0));
+            break;
+
+        case GLUT_KEY_F2:
+            parse(maps.at(1));
+            break;
+
+        case GLUT_KEY_F3:
+            parse(maps.at(2));
+            break;
+
+        case GLUT_KEY_F4:
+            parse(maps.at(3));
+            break;
+
+        case GLUT_KEY_F5:
+            map_zoom_reset();
+            map_center();
+            break;
+
+        case GLUT_KEY_F10:
+            map_info_text_toggle();
+            break;
+
         case GLUT_KEY_F11:
             glutFullScreenToggle();
             break;
@@ -359,6 +445,45 @@ void mouse(int button, int state, int x, int y)
         map_offset_x = map_offset_x + (map_origin_x - x) * map_zoom;
         map_offset_y = map_offset_y + (map_origin_y - y) * map_zoom;
     }
+
+    if (button == GLUT_LEFT_BUTTON && state == GLUT_UP)
+    {
+        if (x != map_origin_x)
+        {
+            if (x > map_origin_x)
+            {
+                if (x > map_origin_x + (map_origin_x / 2))
+                {
+                    map_scroll_right();
+                }
+            }
+            else
+            {
+                if (x < map_origin_x + (map_origin_x / 2))
+                {
+                    map_scroll_left();
+                }
+            }
+        }
+
+        if (y != map_origin_y)
+        {
+            if (y > map_origin_y)
+            {
+                if (y > map_origin_y + (map_origin_y / 2))
+                {
+                    map_scroll_down();
+                }
+            }
+            else
+            {
+                if (y < map_origin_y + (map_origin_y / 2))
+                {
+                    map_scroll_up();
+                }
+            }
+        }
+    }
 }
 
 void mouse_wheel(int button, int direction, int x, int y)
@@ -375,13 +500,13 @@ void mouse_wheel(int button, int direction, int x, int y)
 
 void reshape(int w, int h)
 {
-    glViewport(0, 0, w, h);
-
     window_width  = w;
     window_height = h;
 
     map_origin_x = window_width  / 2;
     map_origin_y = window_height / 2;
+
+    glViewport(0, 0, window_width, window_height);
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -404,15 +529,6 @@ void render()
 
     foreach (map_line_t map_line, map_lines)
     {
-        if (map_line.r == 0 && map_line.g == 0 && map_line.b == 0)
-        {
-            map_line.r = 255;
-            map_line.g = 255;
-            map_line.b = 255;
-        }
-
-        glColor3ub(map_line.r, map_line.g, map_line.b);
-
         float line_start_x = map_line.from_x;
         float line_start_y = map_line.from_y;
 
@@ -428,10 +544,25 @@ void render()
         float line_map_distance_start = calculate_distance(map_origin_x, map_origin_y, line_map_start_x, line_map_start_y);
         float line_map_distance_stop  = calculate_distance(map_origin_x, map_origin_y, line_map_stop_x,  line_map_stop_y);
 
-        if (line_map_distance_start > map_origin_x && line_map_distance_stop > map_origin_x && line_map_distance_start > map_origin_y && line_map_distance_stop > map_origin_y)
+        if
+        (
+            line_map_distance_start > map_origin_x &&
+            line_map_distance_stop  > map_origin_x &&
+            line_map_distance_start > map_origin_y &&
+            line_map_distance_stop  > map_origin_y
+        )
         {
             continue;
         }
+
+        if (map_line.r == 0 && map_line.g == 0 && map_line.b == 0)
+        {
+            map_line.r = 255;
+            map_line.g = 255;
+            map_line.b = 255;
+        }
+
+        glColor3ub(map_line.r, map_line.g, map_line.b);
 
         glVertex2f(line_map_start_x, line_map_start_y);
         glVertex2f(line_map_stop_x,  line_map_stop_y);
@@ -447,15 +578,6 @@ void render()
 
     foreach (map_point_t map_point, map_points)
     {
-        if (map_point.r == 0 && map_point.g == 0 && map_point.b == 0)
-        {
-            map_point.r = 255;
-            map_point.g = 255;
-            map_point.b = 255;
-        }
-
-        glColor3ub(map_point.r, map_point.g, map_point.b);
-
         float point_map_x = ((map_point.x / map_zoom) + map_origin_x) + ((map_draw_x + map_offset_x) / map_zoom);
         float point_map_y = ((map_point.y / map_zoom) + map_origin_y) + ((map_draw_y + map_offset_y) / map_zoom);
 
@@ -465,6 +587,15 @@ void render()
         {
             continue;
         }
+
+        if (map_point.r == 0 && map_point.g == 0 && map_point.b == 0)
+        {
+            map_point.r = 255;
+            map_point.g = 255;
+            map_point.b = 255;
+        }
+
+        glColor3ub(map_point.r, map_point.g, map_point.b);
 
         glBegin(GL_LINES);
             glVertex2f(point_map_x, point_map_y - 4);
@@ -483,28 +614,48 @@ void render()
 
     glColor3f(1.0, 0, 1.0);
 
-    std::stringstream buffer;
+    if (map_draw_info_text == true)
+    {
+        std::vector<std::string> map_info_text;
 
-    buffer << "Resolution: " << window_width << "x" << window_height;
-    draw_bitmap_string(0, 0 + (font_size * 1), font_name, buffer.str());
-    buffer.str("");
+        std::stringstream map_info_text_buffer;
 
-    buffer << "Zoom: " << map_zoom;
-    draw_bitmap_string(0, 0 + (font_size * 2), font_name, buffer.str());
-    buffer.str("");
+        map_info_text_buffer << "Resolution: " << window_width << "x" << window_height;
+        map_info_text.push_back(map_info_text_buffer.str());
+        map_info_text_buffer.str("");
 
-    buffer << "Lines: " << num_lines_ex;
-    draw_bitmap_string(0, 0 + (font_size * 3), font_name, buffer.str());
-    buffer.str("");
+        map_info_text_buffer << "Zoom: " << map_zoom;
+        map_info_text.push_back(map_info_text_buffer.str());
+        map_info_text_buffer.str("");
 
-    buffer << "Points: " << num_points_ex;
-    draw_bitmap_string(0, 0 + (font_size * 4), font_name, buffer.str());
-    buffer.str("");
+        map_info_text_buffer << "Lines: " << num_lines_ex;
+        map_info_text.push_back(map_info_text_buffer.str());
+        map_info_text_buffer.str("");
+
+        map_info_text_buffer << "Points: " << num_points_ex;
+        map_info_text.push_back(map_info_text_buffer.str());
+        map_info_text_buffer.str("");
+
+        int map_info_text_index = 1;
+        foreach (std::string map_info_text_value, map_info_text)
+        {
+            draw_bitmap_string(0, 0 + (font_size * map_info_text_index), font_name, map_info_text_value);
+            map_info_text_index++;
+        }
+    }
 
     float origin_map_x = map_origin_x + (map_offset_x / map_zoom);
     float origin_map_y = map_origin_y + (map_offset_y / map_zoom);
 
-    draw_bitmap_string(origin_map_x, origin_map_y + font_size, font_name, "Origin (0, 0)");
+    glBegin(GL_LINES);
+        glVertex2f(origin_map_x, origin_map_y - 4);
+        glVertex2f(origin_map_x, origin_map_y + 5);
+
+        glVertex2f(origin_map_x - 4, origin_map_y);
+        glVertex2f(origin_map_x + 5, origin_map_y);
+    glEnd();
+
+    draw_bitmap_string(origin_map_x, origin_map_y + (font_size * 1.5), font_name, "Origin (0, 0)");
 
     glutSwapBuffers();
 }
@@ -529,18 +680,35 @@ void init()
     glOrtho(0, window_width, window_height, 0, 0, 1);
 }
 
-int main(int argc, char** argv) 
+int main(int argc, char** argv)
 {
     boost::property_tree::ptree pt;
     boost::property_tree::ini_parser::read_ini(ini_file, pt);
+
+    map_draw_info_text = pt.get<bool>("Options.DrawInfoText");
+
     window_width  = pt.get<int>("Window.Width");
     window_height = pt.get<int>("Window.Height");
+
+    map_origin_x = window_width  / 2;
+    map_origin_y = window_height / 2;
+
+    map_filename = pt.get<std::string>("Map.Filename");
+
+    maps.push_back(pt.get<std::string>("Map.1"));
+    maps.push_back(pt.get<std::string>("Map.2"));
+    maps.push_back(pt.get<std::string>("Map.3"));
+    maps.push_back(pt.get<std::string>("Map.4"));
 
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
 
     glutInitWindowSize(window_width, window_height);
-    glutInitWindowPosition((glutGet(GLUT_SCREEN_WIDTH) - window_width) / 2, (glutGet(GLUT_SCREEN_HEIGHT) - window_height) / 2);
+    glutInitWindowPosition
+    (
+        (glutGet(GLUT_SCREEN_WIDTH)  - window_width)  / 2,
+        (glutGet(GLUT_SCREEN_HEIGHT) - window_height) / 2
+    );
 
     window_id = glutCreateWindow("eqmap");
 
@@ -553,7 +721,7 @@ int main(int argc, char** argv)
     glutMouseWheelFunc(mouse_wheel);
 
     init();
-    parse();
+    parse(map_filename);
 
     glutMainLoop();
 
