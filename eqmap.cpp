@@ -25,6 +25,11 @@ int window_id = 0;
 int window_width  = 640;
 int window_height = 480;
 
+bool mouse_dragging = false;
+
+int mouse_dragging_start_x = 0;
+int mouse_dragging_start_y = 0;
+
 std::string map_filename;
 
 std::vector<std::string> maps;
@@ -50,9 +55,18 @@ float map_draw_y = 0;
 
 bool map_draw_info_text = true;
 
+/*
+    GLUT_BITMAP_9_BY_15
+    GLUT_BITMAP_8_BY_13
+    GLUT_BITMAP_HELVETICA_18
+    GLUT_BITMAP_HELVETICA_12
+    GLUT_BITMAP_HELVETICA_10
+    GLUT_BITMAP_TIMES_ROMAN_24
+    GLUT_BITMAP_TIMES_ROMAN_10
+*/
 void *font_name = GLUT_BITMAP_HELVETICA_10;
 
-int font_size = 10;
+int font_size = 10; // glutBitmapHeight(font_name); crashes
 
 int num_lines    = 0;
 int num_lines_ex = 0;
@@ -118,27 +132,20 @@ void draw_bitmap_string(float x, float y, void *font, std::string text)
     glutBitmapString(font, (const unsigned char*)text.c_str());
 }
 
-void draw_plus(float x, float y)
+void draw_plus(float x, float y, int size)
 {
     glBegin(GL_LINES);
-        glVertex2f(x - 4, y);
-        glVertex2f(x + 4, y);
+        glVertex2f(x - size, y);
+        glVertex2f(x + size, y);
 
-        glVertex2f(x, y - 4);
-        glVertex2f(x, y + 4);
+        glVertex2f(x, y - size);
+        glVertex2f(x, y + size);
     glEnd();
 }
 
-void map_info_text_toggle()
+void map_draw_info_text_toggle()
 {
-    if (map_draw_info_text == true)
-    {
-        map_draw_info_text = false;
-    }
-    else
-    {
-        map_draw_info_text = true;
-    }
+    map_draw_info_text = !map_draw_info_text;
 }
 
 void map_center()
@@ -227,13 +234,6 @@ void parse(std::string map_filename)
             {
                 continue;
             }
-
-/*
-            foreach (std::string line_data_value, line_data)
-            {
-                std::cout << "line_data_value: " << line_data_value << std::endl;
-            }
-*/
 
             if (line_type == 'L')
             {
@@ -403,7 +403,7 @@ void hotkeys(int key, int x, int y)
             break;
 
         case GLUT_KEY_F10:
-            map_info_text_toggle();
+            map_draw_info_text_toggle();
             break;
 
         case GLUT_KEY_F11:
@@ -446,9 +446,20 @@ void hotkeys(int key, int x, int y)
 
 void mouse(int button, int state, int x, int y)
 {
+    if (state == GLUT_UP)
+    {
+        glutSetCursor(GLUT_CURSOR_LEFT_ARROW);
+    }
+
     if (button == GLUT_MIDDLE_BUTTON && state == GLUT_UP)
     {
         map_zoom_reset();
+        map_center();
+    }
+
+    if (button == GLUT_RIGHT_BUTTON && state == GLUT_DOWN)
+    {
+        glutSetCursor(GLUT_CURSOR_CROSSHAIR);
     }
 
     if (button == GLUT_RIGHT_BUTTON && state == GLUT_UP)
@@ -459,41 +470,17 @@ void mouse(int button, int state, int x, int y)
 
     if (button == GLUT_LEFT_BUTTON && state == GLUT_UP)
     {
-        if (x != map_origin_x)
-        {
-            if (x > map_origin_x)
-            {
-                if (x > map_origin_x + (map_origin_x / 2))
-                {
-                    map_scroll_right();
-                }
-            }
-            else
-            {
-                if (x < map_origin_x + (map_origin_x / 2))
-                {
-                    map_scroll_left();
-                }
-            }
-        }
+        mouse_dragging = false;
+    }
 
-        if (y != map_origin_y)
-        {
-            if (y > map_origin_y)
-            {
-                if (y > map_origin_y + (map_origin_y / 2))
-                {
-                    map_scroll_down();
-                }
-            }
-            else
-            {
-                if (y < map_origin_y + (map_origin_y / 2))
-                {
-                    map_scroll_up();
-                }
-            }
-        }
+    if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN)
+    {
+        glutSetCursor(GLUT_CURSOR_CYCLE);
+
+        mouse_dragging_start_x = x;
+        mouse_dragging_start_y = y;
+
+        mouse_dragging = true;
     }
 }
 
@@ -506,6 +493,18 @@ void mouse_wheel(int button, int direction, int x, int y)
     else
     {
         map_zoom_out();
+    }
+}
+
+void motion(int x, int y)
+{
+    if (mouse_dragging == true)
+    {
+        map_offset_x += (x - mouse_dragging_start_x) * map_zoom;
+        map_offset_y += (y - mouse_dragging_start_y) * map_zoom;
+
+        mouse_dragging_start_x = x;
+        mouse_dragging_start_y = y;
     }
 }
 
@@ -531,8 +530,6 @@ void render()
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-
-    //glTranslatef(0.375, 0.375, 0);
 
     glBegin(GL_LINES);
 
@@ -608,7 +605,7 @@ void render()
 
         glColor3ub(map_point.r, map_point.g, map_point.b);
 
-        draw_plus(point_map_x, point_map_y);
+        draw_plus(point_map_x, point_map_y, 4);
 
         draw_bitmap_string(point_map_x, point_map_y + (font_size * 1.5), font_name, map_point.text);
 
@@ -652,7 +649,7 @@ void render()
     float origin_map_x = map_origin_x + (map_offset_x / map_zoom);
     float origin_map_y = map_origin_y + (map_offset_y / map_zoom);
 
-    draw_plus(origin_map_x, origin_map_y);
+    draw_plus(origin_map_x, origin_map_y, 4);
 
     draw_bitmap_string(origin_map_x, origin_map_y + (font_size * 1.5), font_name, "Origin (0, 0)");
 
@@ -689,9 +686,6 @@ int main(int argc, char** argv)
     window_width  = pt.get<int>("Window.Width");
     window_height = pt.get<int>("Window.Height");
 
-    map_origin_x = window_width  / 2;
-    map_origin_y = window_height / 2;
-
     map_filename = pt.get<std::string>("Map.Filename");
 
     maps.push_back(pt.get<std::string>("Map.1"));
@@ -718,6 +712,7 @@ int main(int argc, char** argv)
     glutSpecialFunc(hotkeys);
     glutMouseFunc(mouse);
     glutMouseWheelFunc(mouse_wheel);
+    glutMotionFunc(motion);
 
     init();
     parse(map_filename);
