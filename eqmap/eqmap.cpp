@@ -1,3 +1,7 @@
+// EverQuest Map Viewer
+
+// http://www.cplusplus.com/reference/std/
+// http://www.cplusplus.com/reference/stl/
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -6,6 +10,7 @@
 #include <iomanip>
 #include <cassert>
 
+// http://www.boost.org
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/range/algorithm/replace_if.hpp>
@@ -17,13 +22,21 @@
 #include <boost/foreach.hpp>
 #define foreach BOOST_FOREACH
 
+// http://freeglut.sourceforge.net
+// http://www.transmissionzero.co.uk/software/freeglut-devel/
 //#include <gl/gl.h>
 //#include <gl/glu.h>
 //#include "gl/glut.h"
 #include "gl/freeglut.h"
 
+// http://anttweakbar.sourceforge.net
+// http://anttweakbar.sourceforge.net/doc/
 #include <AntTweakBar.h>
 
+// http://www.lonesock.net/soil.html
+#include "SOIL.h"
+
+// http://msdn.microsoft.com/en-us/library/windows/desktop/
 #include <windows.h>
 #include <shellapi.h>
 
@@ -53,6 +66,15 @@ int window_height = 720;
 
 bool window_start_maximized  = false;
 bool window_start_fullscreen = false;
+
+bool window_use_background_texture = false;
+
+bool window_use_zone_specific_background_texture = false;
+
+GLuint window_background_texture = 0;
+std::string window_background_texture_file = "background.png";
+
+std::string backgrounds_folder = "backgrounds";
 
 TwBar *bar_options;
 TwBar *bar_zones;
@@ -361,6 +383,23 @@ void draw_point(float x, float y, float size)
     glEnd();
 }
 
+void window_load_background_texture()
+{
+    if (!window_background_texture_file.size())
+    {
+        return;
+    }
+
+    window_background_texture = SOIL_load_OGL_texture
+    (
+        window_background_texture_file.c_str(),
+
+        SOIL_LOAD_AUTO,
+        SOIL_CREATE_NEW_ID,
+        0//SOIL_FLAG_INVERT_Y
+    );
+}
+
 void map_draw_info_text_toggle()
 {
     map_draw_info_text = !map_draw_info_text;
@@ -538,11 +577,6 @@ void map_calculate_bounds()
 
 void map_parse_file(std::string filename, int layer)
 {
-    if (file_exists(filename) == false)
-    {
-        return;
-    }
-
     std::ifstream file(filename.c_str());
 
     if (!file.is_open())
@@ -787,6 +821,25 @@ void map_load_zone(std::string zone_name)
     map_center();
 
     map_zoom_to_fit = true;
+
+    if (window_use_zone_specific_background_texture == true)
+    {
+        std::stringstream zone_specific_background_texture_file;
+        zone_specific_background_texture_file << backgrounds_folder << "/" << map_zone_name << ".png";
+
+        if (file_exists(zone_specific_background_texture_file.str()) == true)
+        {
+            window_background_texture_file = zone_specific_background_texture_file.str();
+
+            window_load_background_texture();
+        }
+        else
+        {
+            window_background_texture_file = "background.png";
+
+            window_load_background_texture();
+        }
+    }
 }
 
 void parse_zone_info()
@@ -1118,6 +1171,30 @@ void reshape(int w, int h)
 void render()
 {
     glClear(GL_COLOR_BUFFER_BIT);
+
+    if (window_use_background_texture == true)
+    {
+        if (window_background_texture != 0)
+        {
+            glColor3ub(255, 255, 255);
+
+            glEnable(GL_TEXTURE_2D);
+
+            glBindTexture(GL_TEXTURE_2D, window_background_texture);
+
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+            glBegin(GL_QUADS);
+                glTexCoord2f(0, 0); glVertex2f(0.0f                 , 0.0f                  );
+                glTexCoord2f(1, 0); glVertex2f((GLfloat)window_width, 0.0f                  );
+                glTexCoord2f(1, 1); glVertex2f((GLfloat)window_width, (GLfloat)window_height);
+                glTexCoord2f(0, 1); glVertex2f(0.0f                 , (GLfloat)window_height);
+            glEnd();
+
+            glDisable(GL_TEXTURE_2D);
+        }
+    }
 
     if (map_draw_lines == true)
     {
@@ -1738,6 +1815,11 @@ void TW_CALL bar_options_button_toggle_fullscreen(void *)
     glutFullScreenToggle();
 }
 
+void TW_CALL bar_options_button_load_background_texture(void *)
+{
+    window_load_background_texture();
+}
+
 void TW_CALL bar_options_button_load_zone(void *)
 {
     map_load_zone(map_zone_name);
@@ -1877,6 +1959,17 @@ void bar_options_create()
         " group=Window label='Height: ' help='Height of the map window' ");
     TwAddButton(bar_options, "ToggleFullscreen", bar_options_button_toggle_fullscreen, NULL,
         " group=Window label='Toggle Fullscreen' help='Switch between windowed mode and fullscreen mode' key='F11' ");
+
+    TwAddVarRW(bar_options, "WindowUseBackgroundTexture", TW_TYPE_BOOLCPP, &window_use_background_texture,
+        " group=Background label='Enabled' help='Use an image as the background for the window' key='b' ");
+    TwAddVarRW(bar_options, "WindowUseZoneSpecificBackgroundTexture", TW_TYPE_BOOLCPP, &window_use_zone_specific_background_texture,
+        " group=Background label='Use Zone Specific Textures' help='Use an image that is specific to the current map as the background for the window' key='B' ");
+    TwAddVarRW(bar_options, "WindowBackgroundTextureFile", TW_TYPE_STDSTRING, &window_background_texture_file,
+        " group=Background label='Texture File: ' help='Image file used as the background for the window' ");
+    TwAddButton(bar_options, "WindowLoadBackgroundTexture", bar_options_button_load_background_texture, NULL,
+        " group=Background label='Load Texture' help='Load the background texture' key='t' ");
+
+    TwDefine(" Options/Background group=Window ");
 
     //TwDefine(" Options/Window opened=false ");
 
@@ -2031,6 +2124,12 @@ void map_load_config()
     window_start_maximized  = pt.get<bool>("Window.Maximized",  window_start_maximized);
     window_start_fullscreen = pt.get<bool>("Window.Fullscreen", window_start_fullscreen);
 
+    window_use_background_texture = pt.get<bool>("Window.UseBackgroundTexture", window_use_background_texture);
+
+    window_use_zone_specific_background_texture = pt.get<bool>("Window.UseZoneSpecificBackgroundTexture", window_use_zone_specific_background_texture);
+
+    window_background_texture_file = pt.get<std::string>("Window.BackgroundTextureFile", window_background_texture_file);
+
     zones_file = pt.get<std::string>("Zones.File", zones_file);
 
     map_folder    = pt.get<std::string>("Map.Folder", map_folder);
@@ -2066,6 +2165,8 @@ void map_load_config()
     map_grid_color[0] /= 256;
     map_grid_color[1] /= 256;
     map_grid_color[2] /= 256;
+
+    backgrounds_folder = pt.get<std::string>("Backgrounds.Folder", backgrounds_folder);
 }
 
 LRESULT CALLBACK window_proc_hook(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
@@ -2109,6 +2210,15 @@ LRESULT CALLBACK window_proc_hook(HWND hwnd, UINT message, WPARAM wparam, LPARAM
 
                         bar_zones_refresh();
                     }
+                }
+
+                if (string_contains(drop_filename_stdstring, ".png") == true)
+                {
+                    window_background_texture_file = drop_filename_stdstring;
+
+                    window_load_background_texture();
+
+                    window_use_background_texture = true;
                 }
             }
 
@@ -2197,7 +2307,16 @@ int main(int argc, char** argv)
 
             bar_zones_refresh();
         }
+
+        if (string_contains(argv[1], ".png") == true)
+        {
+            window_background_texture_file = argv[1];
+
+            window_use_background_texture = true;
+        }
     }
+
+    window_load_background_texture();
 
     map_load_zone(map_zone_name);
 
