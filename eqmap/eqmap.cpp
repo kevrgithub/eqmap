@@ -24,11 +24,16 @@
 
 #include <AntTweakBar.h>
 
+#include <windows.h>
+#include <shellapi.h>
+
 #define APPLICATION_NAME "eqmap"
 
 std::string ini_file = "eqmap.ini";
 
 std::string zones_file = "zones.ini";
+
+std::string zones_search = "";
 
 float frames_per_second = 0.0;
 
@@ -39,13 +44,15 @@ int window_id = 0;
 
 HWND window_hwnd;
 
+WNDPROC window_proc_freeglut;
+
+LRESULT CALLBACK window_proc_hook(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
+
 int window_width  = 1280;
 int window_height = 720;
 
 bool window_start_maximized  = false;
 bool window_start_fullscreen = false;
-
-float window_background_color[3] = {0.0, 0.0, 0.0};
 
 TwBar *bar_options;
 TwBar *bar_zones;
@@ -104,14 +111,22 @@ bool map_draw_info_text = true;
 bool map_draw_lines  = true;
 bool map_draw_points = true;
 
-bool map_draw_points_coordinates = false;
-
 bool map_draw_origin = true;
 
 bool map_draw_layer0 = true;
 bool map_draw_layer1 = true;
 bool map_draw_layer2 = true;
 bool map_draw_layer3 = true;
+
+bool map_points_ignore_size = false;
+
+bool map_draw_points_coordinates = false;
+bool map_draw_points_opaque      = false;
+
+bool map_draw_points_layer0 = true;
+bool map_draw_points_layer1 = true;
+bool map_draw_points_layer2 = true;
+bool map_draw_points_layer3 = true;
 
 bool map_zoom_to_fit = false;
 
@@ -205,6 +220,18 @@ bool file_exists(std::string filename)
     return std::ifstream(filename.c_str()).is_open();
 }
 
+bool string_contains(std::string s, std::string text)
+{
+    std::size_t found = s.find(text);
+
+    if (found != std::string::npos)
+    {
+        return true;
+    }
+   
+    return false;
+}
+
 template <class T>
 T reverse_sign(T value)
 {
@@ -237,9 +264,54 @@ std::string get_bool_string(bool b)
     return b ? "True" : "False";
 }
 
-void window_set_background_color(float color3f[])
+void message_box_show_error(std::string text)
 {
-    glClearColor(color3f[0], color3f[1], color3f[2], 1);
+    MessageBoxA(window_hwnd, text.c_str(), APPLICATION_NAME, MB_ICONERROR);
+}
+
+template <class T>
+bool map_line_data_value_can_lexical_cast(std::string filename, int line_number, int line_index, T &output, std::string value, std::string value_name)
+{
+    try
+    {
+        output = boost::lexical_cast<T>(value);
+    }
+    catch (const boost::bad_lexical_cast &e)
+    {
+        std::stringstream error_text;
+        error_text
+            << "Error while parsing map"
+            << "\r\n\r\n"
+            << "File: "  << filename    << "\r\n"
+            << "Line: "  << line_number << "\r\n"
+            << "Index: " << line_index  << "\r\n"
+            << "Value: " << value       << "\r\n"
+            << "Name: "  << value_name
+            << "\r\n\r\n"
+            << e.what();
+
+        message_box_show_error(error_text.str());
+
+        return false;
+    }
+    catch (...)
+    {
+        std::stringstream error_text;
+        error_text
+            << "Unknown exception caught while parsing map"
+            << "\r\n\r\n"
+            << "File: "  << filename    << "\r\n"
+            << "Line: "  << line_number << "\r\n"
+            << "Index: " << line_index  << "\r\n"
+            << "Value: " << value       << "\r\n"
+            << "Name: "  << value_name;
+
+        message_box_show_error(error_text.str());
+
+        return false;
+    }
+
+    return true;
 }
 
 void draw_bitmap_characters(float x, float y, void *font, std::string text)
@@ -259,7 +331,17 @@ void draw_bitmap_string(float x, float y, void *font, std::string text)
     glutBitmapString(font, (const unsigned char*)text.c_str());
 }
 
-void draw_plus(float x, float y, int size)
+void draw_bitmap_string_background(float x, float y, void *font, int font_size, std::string text)
+{
+    glBegin(GL_QUADS);
+        glVertex2f(x                                                              - 1, y             - 0);
+        glVertex2f(x + glutBitmapLength(font, (const unsigned char*)text.c_str()) + 0, y             - 0);
+        glVertex2f(x + glutBitmapLength(font, (const unsigned char*)text.c_str()) + 0, y + font_size + 2);
+        glVertex2f(x                                                              - 1, y + font_size + 2);
+    glEnd();
+}
+
+void draw_plus(float x, float y, float size)
 {
     glBegin(GL_LINES);
         glVertex2f(x - size, y);
@@ -344,6 +426,11 @@ void map_zoom_reset()
 void map_zoom_in()
 {
     map_zoom -= map_zoom_multiplier * map_zoom;
+
+    if (map_zoom < MAP_ZOOM_MIN)
+    {
+        map_zoom = MAP_ZOOM_MIN;
+    }
 }
 
 void map_zoom_out()
@@ -451,48 +538,106 @@ void map_calculate_bounds()
 
 void map_parse_file(std::string filename, int layer)
 {
-    std::fstream file;
-    file.open(filename.c_str(), std::ios::in);
+    if (file_exists(filename) == false)
+    {
+        return;
+    }
+
+    std::ifstream file(filename.c_str());
 
     if (!file.is_open())
     {
         return;
     }
 
+/*
+    file.seekg(0, std::ios::beg);
+
+    char first_three[3];
+    file.read(first_three, 3 * sizeof(char));
+
+    if
+    (
+        (BYTE)first_three[0] == 0xEF &&
+        (BYTE)first_three[1] == 0xBB &&
+        (BYTE)first_three[2] == 0xBF
+    )
+    {
+        message_box_show_error("Error while parsing map\r\n\r\nUTF-8 encoding is not supported");
+
+        return;
+    }
+*/
+
+    file.seekg(0, std::ios::beg);
+
+    char first_char;
+    file >> first_char;
+
+    int num_char_checks = 0;
+
+    while (first_char != 'P' && first_char != 'L')
+    {
+        file >> first_char;
+
+        num_char_checks++;
+
+        if (num_char_checks > 256)
+        {
+            return;
+        }
+    }
+
+    file.seekg(num_char_checks, std::ios::beg);
+
     std::string line;
     std::vector<std::string> line_data;
 
-    if (file.is_open())
+    int line_number = 0;
+
+    while (std::getline(file, line))
     {
-        while (file.good())
+        line_number++;
+
+        boost::replace_all(line, " ", "");
+
+        if (!line.size())
         {
-            std::getline(file, line);
+            continue;
+        }
 
-            boost::replace_all(line, " ", "");
+        char line_type = line.at(0);
 
-            if (!line.size())
-            {
-                continue;
-            }
+        line = line.substr(1);
 
+        boost::split(line_data, line, boost::is_any_of(","));
 
-            char line_type = line.at(0);
+        if (!line_data.size())
+        {
+            continue;
+        }
 
-            line = line.substr(1);
-
-            boost::split(line_data, line, boost::is_any_of(","));
-
-            if (!line_data.size())
-            {
-                continue;
-            }
-
-            if (line_type == 'L')
+        if (line_type == 'L')
+        {
+            if (line_data.size() == 9)
             {
                 map_line_t map_line;
 
                 map_line.layer = layer;
 
+                if (map_line_data_value_can_lexical_cast<float>(filename, line_number, 1, map_line.from_x, line_data.at(0), "Line From X") == false) continue;
+                if (map_line_data_value_can_lexical_cast<float>(filename, line_number, 2, map_line.from_y, line_data.at(1), "Line From Y") == false) continue;
+                if (map_line_data_value_can_lexical_cast<float>(filename, line_number, 3, map_line.from_z, line_data.at(2), "Line From Z") == false) continue;
+
+                if (map_line_data_value_can_lexical_cast<float>(filename, line_number, 4, map_line.to_x, line_data.at(3), "Line To X") == false) continue;
+                if (map_line_data_value_can_lexical_cast<float>(filename, line_number, 5, map_line.to_y, line_data.at(4), "Line To Y") == false) continue;
+                if (map_line_data_value_can_lexical_cast<float>(filename, line_number, 6, map_line.to_z, line_data.at(5), "Line To Z") == false) continue;
+
+                if (map_line_data_value_can_lexical_cast<int>(filename, line_number, 7, map_line.r, line_data.at(6), "Line Red")   == false) continue;
+                if (map_line_data_value_can_lexical_cast<int>(filename, line_number, 8, map_line.g, line_data.at(7), "Line Green") == false) continue;
+                if (map_line_data_value_can_lexical_cast<int>(filename, line_number, 9, map_line.b, line_data.at(8), "Line Blue")  == false) continue;
+
+/*
                 map_line.from_x = boost::lexical_cast<float>(line_data.at(0));
                 map_line.from_y = boost::lexical_cast<float>(line_data.at(1));
                 map_line.from_z = boost::lexical_cast<float>(line_data.at(2));
@@ -504,16 +649,31 @@ void map_parse_file(std::string filename, int layer)
                 map_line.r = boost::lexical_cast<int>(line_data.at(6));
                 map_line.g = boost::lexical_cast<int>(line_data.at(7));
                 map_line.b = boost::lexical_cast<int>(line_data.at(8));
+*/
 
                 map_lines.push_back(map_line);
             }
+        }
 
-            if (line_type == 'P')
+        if (line_type == 'P')
+        {
+            if (line_data.size() == 8)
             {
                 map_point_t map_point;
 
                 map_point.layer = layer;
 
+                if (map_line_data_value_can_lexical_cast<float>(filename, line_number, 1, map_point.x, line_data.at(0), "Point X") == false) continue;
+                if (map_line_data_value_can_lexical_cast<float>(filename, line_number, 2, map_point.y, line_data.at(1), "Point Y") == false) continue;
+                if (map_line_data_value_can_lexical_cast<float>(filename, line_number, 3, map_point.z, line_data.at(2), "Point Z") == false) continue;
+
+                if (map_line_data_value_can_lexical_cast<int>(filename, line_number, 4, map_point.r, line_data.at(3), "Point Red")   == false) continue;
+                if (map_line_data_value_can_lexical_cast<int>(filename, line_number, 5, map_point.g, line_data.at(4), "Point Green") == false) continue;
+                if (map_line_data_value_can_lexical_cast<int>(filename, line_number, 6, map_point.b, line_data.at(5), "Point Blue")  == false) continue;
+
+                if (map_line_data_value_can_lexical_cast<int>(filename, line_number, 7, map_point.size, line_data.at(6), "Point Size") == false) continue;
+
+/*
                 map_point.x = boost::lexical_cast<float>(line_data.at(0));
                 map_point.y = boost::lexical_cast<float>(line_data.at(1));
                 map_point.z = boost::lexical_cast<float>(line_data.at(2));
@@ -523,6 +683,7 @@ void map_parse_file(std::string filename, int layer)
                 map_point.b = boost::lexical_cast<int>(line_data.at(5));
 
                 map_point.size = boost::lexical_cast<int>(line_data.at(6));
+*/
 
                 map_point.text = line_data.at(7);
 
@@ -543,9 +704,30 @@ void map_load_zone(std::string zone_name)
 
     std::stringstream buffer;
 
-    buffer << map_folder << "/" << zone_name << ".txt";
-    std::string map_filename = buffer.str();
-    buffer.str("");
+    std::string map_filename;
+
+    bool use_map_folder = true;
+
+    if (string_contains(zone_name, "\\") == true)
+    {
+        use_map_folder = false;
+    }
+
+    if (string_contains(zone_name, "/") == true)
+    {
+        use_map_folder = false;
+    }
+
+    if (use_map_folder == true)
+    {
+        buffer << map_folder << "/" << zone_name << ".txt";
+        map_filename = buffer.str();
+        buffer.str("");
+    }
+    else
+    {
+        map_filename = zone_name;
+    }
 
     if (file_exists(map_filename) == true)
     {
@@ -635,28 +817,23 @@ void parse_zone_info()
                 continue;
             }
 
-            std::size_t found;
-
-            found = line.find("#");
-            if (found != std::string::npos)
+            if (string_contains(line, "#") == true)
             {
                 continue;
             }
 
-            found = line.find("//");
-            if (found != std::string::npos)
+            if (string_contains(line, "//") == true)
             {
                 continue;
             }
 
-            found = line.find("[");
-            if (found != std::string::npos)
+            if (string_contains(line, "[") == true)
             {
-                found = line.find("]");
-                if (found != std::string::npos)
+                if (string_contains(line, "]") == true)
                 {
                     line.erase(boost::remove_if(line, boost::is_any_of("[]")), line.end());
                     zone_info_group = line;
+
                     continue;
                 }
             }
@@ -940,8 +1117,6 @@ void reshape(int w, int h)
 
 void render()
 {
-    window_set_background_color(window_background_color);
-
     glClear(GL_COLOR_BUFFER_BIT);
 
     if (map_draw_lines == true)
@@ -1044,24 +1219,11 @@ void render()
                 continue;
             }
 
-            if (window_background_color[0] == 0 && window_background_color[1] == 0 && window_background_color[2] == 0)
+            if (map_line.r == 0 && map_line.g == 0 && map_line.b == 0)
             {
-                if (map_line.r == 0 && map_line.g == 0 && map_line.b == 0)
-                {
-                    map_line.r = 255;
-                    map_line.g = 255;
-                    map_line.b = 255;
-                }
-            }
-
-            if (window_background_color[0] == 255 && window_background_color[1] == 255 && window_background_color[2] == 255)
-            {
-                if (map_line.r == 255 && map_line.g == 255 && map_line.b == 255)
-                {
-                    map_line.r = 0;
-                    map_line.g = 0;
-                    map_line.b = 0;
-                }
+                map_line.r = 255;
+                map_line.g = 255;
+                map_line.b = 255;
             }
 
             glColor3ub(map_line.r, map_line.g, map_line.b);
@@ -1247,11 +1409,21 @@ void render()
                 {
                     continue;
                 }
+
+                if (map_draw_points_layer0 == false)
+                {
+                    continue;
+                }
             }
 
             if (layer == 1)
             {
                 if (map_draw_layer1 == false)
+                {
+                    continue;
+                }
+
+                if (map_draw_points_layer1 == false)
                 {
                     continue;
                 }
@@ -1263,11 +1435,21 @@ void render()
                 {
                     continue;
                 }
+
+                if (map_draw_points_layer2 == false)
+                {
+                    continue;
+                }
             }
 
             if (layer == 3)
             {
                 if (map_draw_layer3 == false)
+                {
+                    continue;
+                }
+
+                if (map_draw_points_layer3 == false)
                 {
                     continue;
                 }
@@ -1287,38 +1469,54 @@ void render()
                 continue;
             }
 
-            if (window_background_color[0] == 0 && window_background_color[1] == 0 && window_background_color[2] == 0)
+            if (map_point.r == 0 && map_point.g == 0 && map_point.b == 0)
             {
-                if (map_point.r == 0 && map_point.g == 0 && map_point.b == 0)
-                {
-                    map_point.r = 255;
-                    map_point.g = 255;
-                    map_point.b = 255;
-                }
+                map_point.r = 255;
+                map_point.g = 255;
+                map_point.b = 255;
             }
-
-            if (window_background_color[0] == 255 && window_background_color[1] == 255 && window_background_color[2] == 255)
-            {
-                if (map_point.r == 255 && map_point.g == 255 && map_point.b == 255)
-                {
-                    map_point.r = 0;
-                    map_point.g = 0;
-                    map_point.b = 0;
-                }
-            }
-
-            glColor3ub(map_point.r, map_point.g, map_point.b);
-
-            draw_plus(point_map_x, point_map_y, 4);
 
             int point_font_size   = font_size;
             void *point_font_name = font_name;
 
-            if (map_point.size == 3)
+            if (map_points_ignore_size == false)
             {
-                point_font_size = 12;
-                point_font_name = GLUT_BITMAP_HELVETICA_12;
+                if (map_point.size == 1)
+                {
+                    point_font_size = 10;
+                    point_font_name = GLUT_BITMAP_HELVETICA_10;
+                }
+
+                if (map_point.size == 2)
+                {
+                    point_font_size = 12;
+                    point_font_name = GLUT_BITMAP_HELVETICA_12;
+                }
+
+                if (map_point.size == 3)
+                {
+                    point_font_size = 18;
+                    point_font_name = GLUT_BITMAP_HELVETICA_18;
+                }
             }
+
+            if (map_draw_points_opaque == true)
+            {
+                float point_background_x = point_map_x;
+                float point_background_y = point_map_y + (point_font_size * font_offset_y) - point_font_size;
+
+                glColor3ub(0, 0, 128);
+
+                draw_bitmap_string_background(point_background_x, point_background_y, point_font_name, point_font_size, map_point.text);
+
+                glColor3ub(255, 255, 255);
+            }
+            else
+            {
+                glColor3ub(map_point.r, map_point.g, map_point.b);
+            }
+
+            draw_plus(point_map_x, point_map_y, 4);
 
             draw_bitmap_string(point_map_x, point_map_y + (point_font_size * font_offset_y), point_font_name, map_point.text);
 
@@ -1330,7 +1528,23 @@ void render()
                 std::stringstream map_point_coordinates_text;
                 map_point_coordinates_text << std::setprecision(2) << std::fixed << "(" << loc_y << ", " << loc_x << ")";
 
-                draw_bitmap_string(point_map_x, point_map_y + (point_font_size * font_offset_y) * 2, point_font_name, map_point_coordinates_text.str());
+                if (map_draw_points_opaque == true)
+                {
+                    float point_background_x = point_map_x;
+                    float point_background_y = point_map_y + ((point_font_size * font_offset_y) * 2) - point_font_size;
+
+                    glColor3ub(0, 0, 128);
+
+                    draw_bitmap_string_background(point_background_x, point_background_y, point_font_name, point_font_size, map_point_coordinates_text.str());
+
+                    glColor3ub(255, 255, 255);
+                }
+                //else
+                //{
+                    //glColor3ub(map_point.r, map_point.g, map_point.b);
+                //}
+
+                draw_bitmap_string(point_map_x, point_map_y + ((point_font_size * font_offset_y) * 2), point_font_name, map_point_coordinates_text.str());
             }
 
             map_points_visible++;
@@ -1360,20 +1574,26 @@ void render()
     {
         if (map_lines_visible == map_lines_total)
         {
-            map_zoom_to_fit = false;
-        }
+            if (map_points_visible == map_points_total && map_points_total > 0)
+            {
+                //map_zoom += 0.5;
 
-        if (map_points_visible == map_points_total && map_points_total > 0)
-        {
-            map_zoom_to_fit = false;
+                map_zoom_to_fit = false;
+            }
+
+            if (map_points_total > 0 && map_points_visible < map_points_total)
+            {
+                map_zoom += 1.0;
+            }
+            else
+            {
+                //map_zoom += 0.5;
+
+                map_zoom_to_fit = false;
+            }
         }
 
         if (map_lines_total > 0 && map_lines_visible < map_lines_total)
-        {
-            map_zoom += 1.0;
-        }
-
-        if (map_points_total > 0 && map_points_visible < map_points_total)
         {
             map_zoom += 1.0;
         }
@@ -1420,11 +1640,43 @@ void render()
         map_info_text.push_back(map_info_text_buffer.str());
         map_info_text_buffer.str("");
 
-        map_info_text_buffer << "Lines: " << map_lines_visible_ex;
+        map_info_text_buffer << "Lines: ";
+        if (map_draw_lines == true)
+        {
+            map_info_text_buffer << map_lines_visible_ex;
+        }
+        else
+        {
+            map_info_text_buffer << get_bool_string(map_draw_lines);
+        }
         map_info_text.push_back(map_info_text_buffer.str());
         map_info_text_buffer.str("");
 
-        map_info_text_buffer << "Points: " << map_points_visible_ex;
+        map_info_text_buffer << "Points: ";
+        if (map_draw_points == true)
+        {
+            map_info_text_buffer << map_points_visible_ex;
+        }
+        else
+        {
+            map_info_text_buffer << get_bool_string(map_draw_points);
+        }
+        map_info_text.push_back(map_info_text_buffer.str());
+        map_info_text_buffer.str("");
+
+        map_info_text_buffer << "Base: " << get_bool_string(map_draw_layer0);
+        map_info_text.push_back(map_info_text_buffer.str());
+        map_info_text_buffer.str("");
+
+        map_info_text_buffer << "Layer 1: " << get_bool_string(map_draw_layer1);
+        map_info_text.push_back(map_info_text_buffer.str());
+        map_info_text_buffer.str("");
+
+        map_info_text_buffer << "Layer 2: " << get_bool_string(map_draw_layer2);
+        map_info_text.push_back(map_info_text_buffer.str());
+        map_info_text_buffer.str("");
+
+        map_info_text_buffer << "Layer 3: " << get_bool_string(map_draw_layer3);
         map_info_text.push_back(map_info_text_buffer.str());
         map_info_text_buffer.str("");
 
@@ -1443,6 +1695,11 @@ void render()
     glutPostRedisplay();
 }
 
+void idle()
+{
+    glutPostRedisplay();
+}
+
 void init_gl()
 {
     glDisable(GL_TEXTURE_2D);
@@ -1451,12 +1708,7 @@ void init_gl()
 
     glFrontFace(GL_CW);
 
-    window_background_color[0] = 0.0f;
-    window_background_color[1] = 0.0f;
-    window_background_color[2] = 0.0f;
-
-    window_set_background_color(window_background_color);
-    //glClearColor(0, 0, 0, 1);
+    glClearColor(0, 0, 0, 1);
 
     glViewport(0, 0, window_width, window_height);
 
@@ -1516,13 +1768,18 @@ void TW_CALL bar_options_button_exit(void *)
 
 void bar_zones_create();
 
-void TW_CALL bar_zones_button_refresh_zones(void *)
+void bar_zones_refresh()
 {
     TwDeleteBar(bar_zones);
 
     bar_zones_create();
 
     TwDefine(" Zones iconified=false ");
+}
+
+void TW_CALL bar_zones_button_refresh_zones(void *)
+{
+    bar_zones_refresh();
 }
 
 void TW_CALL bar_zones_button_zone_name(void *client_data)
@@ -1549,6 +1806,9 @@ void bar_zones_create()
     TwAddVarRW(bar_zones, "ZonesFile", TW_TYPE_STDSTRING, &zones_file,
         " label='File: ' help='File that contains the zones information' ");
 
+    TwAddVarRW(bar_zones, "ZonesSearch", TW_TYPE_STDSTRING, &zones_search,
+        " label='Search: ' help='Filter out zones from the list by name' ");
+
     TwAddButton(bar_zones, "RefreshZones", bar_zones_button_refresh_zones, NULL,
         " label='Refresh Zones List' help='Refresh the list of zones by reading the zones file again' ");
 
@@ -1558,6 +1818,30 @@ void bar_zones_create()
 
     foreach (zone_info_t zone_info, zone_infos)
     {
+        bool skip_zone = false;
+
+        if (zones_search.size() > 0)
+        {
+            std::string zones_search_to_lower = boost::to_lower_copy(zones_search);
+
+            std::string zone_info_name_long_to_lower = boost::to_lower_copy(zone_info.name_long);
+
+            if (string_contains(zone_info_name_long_to_lower, zones_search_to_lower) == false)
+            {
+                skip_zone = true;
+            }
+
+            if (zones_search_to_lower == zone_info.name_short)
+            {
+                skip_zone = false;
+            }
+        }
+
+        if (skip_zone == true)
+        {
+            continue;
+        }
+
         vp = static_cast<void*>(new std::string(zone_info.name_short));
 
         std::string zone_info_group_no_spaces = boost::replace_all_copy(zone_info.group, " ", "");
@@ -1593,8 +1877,6 @@ void bar_options_create()
         " group=Window label='Height: ' help='Height of the map window' ");
     TwAddButton(bar_options, "ToggleFullscreen", bar_options_button_toggle_fullscreen, NULL,
         " group=Window label='Toggle Fullscreen' help='Switch between windowed mode and fullscreen mode' key='F11' ");
-    TwAddVarRW(bar_options, "WindowBackgroundColor", TW_TYPE_COLOR3F, &window_background_color,
-        " group=Window label='Background Color: ' help='Change the background color of the window' ");
 
     //TwDefine(" Options/Window opened=false ");
 
@@ -1613,6 +1895,8 @@ void bar_options_create()
         " group=Map label='FPS: ' help='The amount of time it takes to draw the map each frame' precision=2 ");
     TwAddVarRW(bar_options, "MapZoom", TW_TYPE_FLOAT, &map_zoom,
         " group=Map label='Zoom: ' help='Scales the size of the map' keyIncr='-' keyDecr='+' min=0.01 max=1000 step=0.25 precision=2 ");
+    TwAddVarRW(bar_options, "MapZoomMultiplier", TW_TYPE_FLOAT, &map_zoom_multiplier,
+        " group=Map label='Zoom Multiplier: ' help='Amount to zoom when scaling the map' min=0.01 max=10 step=0.01 precision=2 ");
 
     TwAddVarRO(bar_options, "MapLinesTotal", TW_TYPE_UINT32, &map_lines_total,
         " group=Map label='Lines: ' help='Number of lines the map has' ");
@@ -1633,8 +1917,6 @@ void bar_options_create()
         " group=Draw label='Lines' help='Draw the lines of the map' key='l' ");
     TwAddVarRW(bar_options, "MapDrawPoints", TW_TYPE_BOOLCPP, &map_draw_points,
         " group=Draw label='Points' help='Draw the points or text labels of the map' key='p' ");
-    TwAddVarRW(bar_options, "MapDrawPointsCoordinates", TW_TYPE_BOOLCPP, &map_draw_points_coordinates,
-        " group=Draw label='Points /loc Coordinates' help='Draw the /loc coordinates for points or text labels of the map' key='P' ");
     TwAddVarRW(bar_options, "MapDrawOrigin", TW_TYPE_BOOLCPP, &map_draw_origin,
         " group=Draw label='Origin' help='Draw a label at the origin coordinates 0,0' key='o' ");
 
@@ -1650,6 +1932,26 @@ void bar_options_create()
         " group=Layers label='Layer 3' help='Draw the third map layer' key='F3' ");
 
     TwDefine(" Options/Layers group=Map ");
+
+    TwAddVarRW(bar_options, "MapPointsIgnoreSize", TW_TYPE_BOOLCPP, &map_points_ignore_size,
+        " group=Points label='Ignore Size' help='Always use the smallest size for points or text labels of the map' ");
+    TwAddVarRW(bar_options, "MapDrawPointsCoordinates", TW_TYPE_BOOLCPP, &map_draw_points_coordinates,
+        " group=Points label='Show /loc Coordinates' help='Show the /loc coordinates for points or text labels of the map' key='P' ");
+    TwAddVarRW(bar_options, "MapDrawPointsOpaque", TW_TYPE_BOOLCPP, &map_draw_points_opaque,
+        " group=Points label='Opaque Background' help='Draw an opaque background behind points or text labels of the map' ");
+
+    TwAddSeparator(bar_options, NULL, " group=Points ");
+
+    TwAddVarRW(bar_options, "MapDrawPointsLayer0", TW_TYPE_BOOLCPP, &map_draw_points_layer0,
+        " group=Points label='Base' help='Draw the points or text labels of the base map layer' ");
+    TwAddVarRW(bar_options, "MapDrawPointsLayer1", TW_TYPE_BOOLCPP, &map_draw_points_layer1,
+        " group=Points label='Layer 1' help='Draw the points or text labels of the first map layer' ");
+    TwAddVarRW(bar_options, "MapDrawPointsLayer2", TW_TYPE_BOOLCPP, &map_draw_points_layer2,
+        " group=Points label='Layer 2' help='Draw the points or text labels of the second map layer' ");
+    TwAddVarRW(bar_options, "MapDrawPointsLayer3", TW_TYPE_BOOLCPP, &map_draw_points_layer3,
+        " group=Points label='Layer 3' help='Draw the points or text labels of the third map layer' ");
+
+    TwDefine(" Options/Points group=Map ");
 
     TwAddVarRW(bar_options, "MinZ", TW_TYPE_FLOAT, &map_min_z,
         " group=HeightFilter label='Minimum Z-Axis: ' help='Filters out lines below this height' keyIncr='PGUP' keyDecr='PGDOWN' step=1 precision=2 ");
@@ -1697,7 +1999,7 @@ void bar_options_create()
     TwAddVarRW(bar_options, "MapGridSize", TW_TYPE_FLOAT, &map_grid_size,
         " group=Grid label='Size: ' ");
     TwAddVarRW(bar_options, "MapGridColor", TW_TYPE_COLOR3F, &map_grid_color,
-        " group=Grid label=Color: ' help='Change the color of the grid' ");
+        " group=Grid label='Color: ' help='Change the color of the grid' ");
 
     TwDefine(" Options/Grid group=Map ");
 
@@ -1738,13 +2040,21 @@ void map_load_config()
 
     map_draw_lines  = pt.get<bool>("Draw.Lines",  map_draw_lines);
     map_draw_points = pt.get<bool>("Draw.Points", map_draw_points);
-    map_draw_points_coordinates = pt.get<bool>("Draw.PointsCoordinates", map_draw_points_coordinates);
     map_draw_origin = pt.get<bool>("Draw.Origin", map_draw_origin);
 
     map_draw_layer0 = pt.get<bool>("Layers.Base",   map_draw_layer0);
     map_draw_layer1 = pt.get<bool>("Layers.Layer1", map_draw_layer1);
     map_draw_layer2 = pt.get<bool>("Layers.Layer2", map_draw_layer2);
     map_draw_layer3 = pt.get<bool>("Layers.Layer3", map_draw_layer3);
+
+    map_points_ignore_size = pt.get<bool>("Points.IgnoreSize", map_points_ignore_size);
+
+    map_draw_points_coordinates = pt.get<bool>("Points.ShowCoordinates",  map_draw_points_coordinates);
+    map_draw_points_opaque      = pt.get<bool>("Points.OpaqueBackground", map_draw_points_opaque);
+    map_draw_points_layer0      = pt.get<bool>("Points.Base",             map_draw_points_layer0);
+    map_draw_points_layer1      = pt.get<bool>("Points.Layer1",           map_draw_points_layer1);
+    map_draw_points_layer2      = pt.get<bool>("Points.Layer2",           map_draw_points_layer2);
+    map_draw_points_layer3      = pt.get<bool>("Points.Layer3",           map_draw_points_layer3);
 
     map_draw_grid             = pt.get<bool>("Grid.Enabled",     map_draw_grid);
     map_draw_grid_coordinates = pt.get<bool>("Grid.Coordinates", map_draw_grid_coordinates);
@@ -1756,6 +2066,59 @@ void map_load_config()
     map_grid_color[0] /= 256;
     map_grid_color[1] /= 256;
     map_grid_color[2] /= 256;
+}
+
+LRESULT CALLBACK window_proc_hook(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
+{
+    switch (message)
+    {
+        case WM_DROPFILES:
+            HDROP drop = (HDROP)wparam;
+
+            UINT drop_file = DragQueryFile(drop, 0xFFFFFFFF, NULL, NULL);
+
+            if (drop_file != 1)
+            {
+                message_box_show_error("Drag and drop multiple files is not supported.");
+
+                DragFinish(drop);
+                break;
+            }
+
+            LPSTR drop_filename[MAX_PATH] = {0};
+            drop_filename[0] = '\0';
+
+            if (DragQueryFileA(drop, 0, (LPSTR)drop_filename, MAX_PATH))
+            {
+                //MessageBoxA(hwnd, (LPCSTR)drop_filename, APPLICATION_NAME, MB_ICONINFORMATION);
+
+                std::string drop_filename_stdstring = (char*)drop_filename;
+
+                if (string_contains(drop_filename_stdstring, ".txt") == true)
+                {
+                    map_zone_name = drop_filename_stdstring;
+
+                    map_load_zone(map_zone_name);
+                }
+
+                if (string_contains(drop_filename_stdstring, ".ini") == true)
+                {
+                    if (string_contains(drop_filename_stdstring, ini_file) == false)
+                    {
+                        zones_file = drop_filename_stdstring;
+
+                        bar_zones_refresh();
+                    }
+                }
+            }
+
+            DragFinish(drop);
+            break;
+    }
+
+    LRESULT result = CallWindowProc(window_proc_freeglut, hwnd, message, wparam, lparam);
+
+    return result;
 }
 
 int main(int argc, char** argv)
@@ -1776,6 +2139,12 @@ int main(int argc, char** argv)
 
     window_hwnd = FindWindowA("FREEGLUT", APPLICATION_NAME);
 
+    window_proc_freeglut = (WNDPROC)GetWindowLongPtr(window_hwnd, GWLP_WNDPROC);
+
+    SetWindowLongPtr(window_hwnd, GWLP_WNDPROC, (LONG_PTR)window_proc_hook);
+
+    DragAcceptFiles(window_hwnd, true);
+
     if (window_start_maximized == true)
     {
         ShowWindow(window_hwnd, SW_MAXIMIZE);
@@ -1787,7 +2156,7 @@ int main(int argc, char** argv)
     }
 
     glutDisplayFunc(render);
-    glutIdleFunc(render);
+    //glutIdleFunc(idle);
     glutReshapeFunc(reshape);
     glutKeyboardFunc(keyboard);
     glutSpecialFunc(special);
@@ -1814,6 +2183,21 @@ int main(int argc, char** argv)
     bar_zones_create();
 
     TwWindowSize(window_width, window_height);
+
+    if (argc == 2)
+    {
+        if (string_contains(argv[1], ".txt") == true)
+        {
+            map_zone_name = argv[1];
+        }
+
+        if (string_contains(argv[1], ".ini") == true)
+        {
+            zones_file = argv[1];
+
+            bar_zones_refresh();
+        }
+    }
 
     map_load_zone(map_zone_name);
 

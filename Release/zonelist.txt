@@ -1,0 +1,170 @@
+acrylia Acrylia Caverns 
+airplane Plane of Air 
+akanon Ak'Anon 
+akheva Akheva Ruins 
+arena The Arena 
+bazaar The Bazaar 
+befallen Befallen 
+beholder Gorge of King Xorbb 
+blackburrow Blackburrow 
+bothunder Bastion of Thunder 
+burningwood The Burning Wood 
+butcher Butcherblock Mountains 
+cabeast Cabilis East 
+cabwest Cabilis West 
+cauldron Dagnor's Cauldron 
+cazicthule Lost Temple of CazicThule 
+charasis Howling stones 
+chardok Chardok 
+citymist The City of Mist 
+cobaltscar Cobalt Scar 
+commons West Commonlands 
+crushbone Crushbone 
+crystal Crystal Caverns 
+cshome Sunset Home 
+dalnir Dalnir 
+dawnshroud Dawnshroud Peaks 
+dreadlands Dreadlands 
+droga Mines of Droga 
+eastkarana Eastern Plains of Karana 
+eastwastes Eastern Wastelands 
+echo Echo Caverns 
+ecommons East Commonlands 
+emeraldjungle The Emerald Jungle 
+erudnext Erudin 
+erudnint Erudin Palace 
+erudsxing Erud's Crossing 
+everfrost Everfrost 
+fearplane Plane of Fear 
+feerrott The Feerrott 
+felwithea Northern Felwithe 
+felwitheb Southern Felwithe 
+fieldofbone Field of Bone 
+firiona Firiona Vie 
+freporte East Freeport 
+freportn North Freeport 
+freportw West Freeport 
+frontiermtns Frontier Mountains 
+frozenshadow Tower of Frozen Shadow 
+fungusgrove Fungus Grove 
+gfaydark Greater Faydark 
+greatdivide Great Divide 
+griegsend Grieg's End 
+grimling Grimling Forest 
+grobb Grobb 
+growthplane Plane of Growth 
+gukbottom Ruins of Old Guk 
+guktop Guk 
+halas Halas 
+hateplane Plane of Hate 
+highkeep High Keep 
+highpass Highpass Hold 
+hohonora Halls of Honor 
+hole The Hole 
+hollowshade Hollowshade Moor 
+iceclad Iceclad Ocean 
+innothule Innothule Swamp 
+kael Kael Drakael 
+kaesora Kaesora 
+kaladima North Kaladim 
+kaladimb South Kaladim 
+karnor Karnor's Castle 
+katta Katta Castellum 
+kedge Kedge Keep 
+kerraridge Kerra Isle 
+kithicor Kithicor Woods 
+kurn Kurn's Tower 
+lakeofillomen Lake of Ill Omen 
+lakerathe Lake Rathetear 
+lavastorm Lavastorm Mountains 
+letalis Mons Letalis 
+lfaydark Lesser Faydark 
+load Loading Zone 
+maiden The Maiden's Eye 
+mischiefplane Plane of Mischief 
+mistmoore Castle Mistmoore 
+misty Misty Thicket 
+mseru Marus Seru 
+najena Najena 
+necropolis Dragon Necropolis 
+nektulos Nektulos Forest 
+neriaka Neriak Foreign Quarter 
+neriakb Neriak Commons 
+neriakc Neriak Third Gate 
+netherbian Netherbian Lair 
+nexus The Nexus 
+northkarana Northern Plains of Karana 
+nro Northern Desert of Ro 
+nurga Mines of Nurga 
+oasis Oasis of Marr 
+oggok Oggok 
+oot Ocean of Tears 
+overthere The Overthere 
+paineel Paineel 
+paludal Paludal Caverns 
+paw Lair of the Splitpaw 
+permafrost Permafrost Caverns 
+powar Plane of War 
+poearth Plane of Earth 
+pofire Doomfire, Burning Lands 
+powater Plane of Water 
+poinnovation Plane of Innovation 
+podisease Plane of Disease 
+pojustice Plane of Justice 
+ponightmare Plane of Nightmare 
+potranquility Plane of Tranquility 
+potimea Plane of Time A 
+potimeb Plane of Time B 
+povalor Plane of Valor 
+postorms Plane of Storms 
+poknowledge Plane of Knowledge 
+potorment Plane of Torment 
+qcat Qeynos Aqueduct System 
+qey2hh1 Western Plains of Karana 
+qeynos South Qeynos 
+qeynos2 North Qeynos 
+qeytoqrg Qeynos Hills 
+qrg Surefall Glade 
+rathemtn Rathe Mountains 
+rivervale Rivervale 
+runnyeye Runnyeye Citadel 
+scarlet The Scarlet Desert 
+sebilis Old Sebilis 
+shadeweaver Shadeweavers Thicket 
+shadowhaven Shadow Haven 
+sharvahl Shar Vahl 
+sirens Sirens Grotto 
+skyfire Skyfire Mountains 
+skyshrine Skyshrine 
+sleeper Sleepers Tomb 
+soldunga Solusek's Eye 
+soldungb Nagafen's Lair 
+solrotower Tower of Solusek Ro 
+soltemple Temple of Solusek Ro 
+southkarana Southern Plains of Karana 
+sro Southern Desert of Ro 
+sseru Sanctus Seru 
+ssratemple Ssraeshza Temple 
+steamfont Steamfont Mountains 
+stonebrunt Stonebrunt Mountains 
+swampofnohope Swamp Of No Hope 
+templeveeshan Temple of Veeshan 
+tenebrous The Tenebrous Mountains 
+thedeep The Deepshade 
+thegrey The Grey 
+thurgadina City of Thurgadin 
+thurgadinb Icewell Keep 
+timorous Timorous Deep 
+tox Toxxulia Forest 
+trakanon Trakanon's Teeth 
+tutorial The Tutorial Zone 
+twilight The Twilight Sea 
+umbral The Umbral Plains 
+unrest Estate of Unrest 
+veeshan Veeshan's Peak 
+velketor Velketor's Labrynth 
+vexthal Vex Thal 
+wakening The Wakening Lands 
+warrens Warrens 
+warslikswood Warslilks Woods 
+westwastes Western Wastelands
