@@ -22,23 +22,40 @@
 #include <boost/foreach.hpp>
 #define foreach BOOST_FOREACH
 
+// http://msdn.microsoft.com/en-us/library/windows/desktop/
+#include <windows.h>
+#include <shellapi.h>
+
+/*
 // http://freeglut.sourceforge.net
+// http://freeglut.sourceforge.net/docs/api.php
 // http://www.transmissionzero.co.uk/software/freeglut-devel/
 //#include <gl/gl.h>
 //#include <gl/glu.h>
 //#include "gl/glut.h"
 #include "gl/freeglut.h"
+*/
+
+// http://www.glfw.org/
+// http://www.glfw.org/documentation.html
+#define GLFW_DLL
+#include <GLFW/glfw3.h>
+#define GLFW_EXPOSE_NATIVE_WIN32
+#define GLFW_EXPOSE_NATIVE_WGL
+#include <GLFW/glfw3native.h>
 
 // http://anttweakbar.sourceforge.net
 // http://anttweakbar.sourceforge.net/doc/
 #include <AntTweakBar.h>
 
-// http://www.lonesock.net/soil.html
-#include "SOIL.h"
+// http://sourceforge.net/projects/ftgl/
+// http://ftgl.sourceforge.net/docs/html/index.html
+// http://ftgl.sourceforge.net/docs/html/ftgl-tutorial.html
+#include <FTGL/ftgl.h>
 
-// http://msdn.microsoft.com/en-us/library/windows/desktop/
-#include <windows.h>
-#include <shellapi.h>
+// http://www.lonesock.net/soil.html
+// https://bitbucket.org/SpartanJ/soil2
+#include "SOIL2.h"
 
 #define APPLICATION_NAME "eqmap"
 
@@ -53,11 +70,11 @@ float frames_per_second = 0.0;
 int last_tick = 0;
 int frame_count = 0;
 
-int window_id = 0;
+GLFWwindow *window_object;
 
 HWND window_hwnd;
 
-WNDPROC window_proc_freeglut;
+WNDPROC window_proc_normal;
 
 LRESULT CALLBACK window_proc_hook(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 
@@ -67,22 +84,32 @@ int window_height = 720;
 bool window_start_maximized  = false;
 bool window_start_fullscreen = false;
 
+bool window_is_fullscreen = false;
+
+std::string backgrounds_folder = "backgrounds";
+
 bool window_use_background_texture = false;
 
 bool window_use_zone_specific_background_texture = false;
 
 GLuint window_background_texture = 0;
-std::string window_background_texture_file = "background.png";
 
-std::string backgrounds_folder = "backgrounds";
+std::string background_file_default = "background.png";
+
+std::string background_file = background_file_default;
+
+std::string anttweakbar_last_error = "";
 
 TwBar *bar_options;
 TwBar *bar_zones;
 
+double mouse_x = 0;
+double mouse_y = 0;
+
 bool mouse_dragging = false;
 
-int mouse_dragging_start_x = 0;
-int mouse_dragging_start_y = 0;
+double mouse_dragging_start_x = 0;
+double mouse_dragging_start_y = 0;
 
 std::string map_folder = "maps";
 std::string map_zone_name = "qeynos";
@@ -135,15 +162,17 @@ bool map_draw_points = true;
 
 bool map_draw_origin = true;
 
+std::string origin_text = "Origin (0, 0)";
+
 bool map_draw_layer0 = true;
 bool map_draw_layer1 = true;
 bool map_draw_layer2 = true;
 bool map_draw_layer3 = true;
 
-bool map_points_ignore_size = false;
-
-bool map_draw_points_coordinates = false;
-bool map_draw_points_opaque      = false;
+bool map_draw_lines_layer0 = true;
+bool map_draw_lines_layer1 = true;
+bool map_draw_lines_layer2 = true;
+bool map_draw_lines_layer3 = true;
 
 bool map_draw_points_layer0 = true;
 bool map_draw_points_layer1 = true;
@@ -152,18 +181,30 @@ bool map_draw_points_layer3 = true;
 
 bool map_zoom_to_fit = false;
 
-/*
-GLUT_BITMAP_9_BY_15
-GLUT_BITMAP_8_BY_13
-GLUT_BITMAP_HELVETICA_18
-GLUT_BITMAP_HELVETICA_12
-GLUT_BITMAP_HELVETICA_10
-GLUT_BITMAP_TIMES_ROMAN_24
-GLUT_BITMAP_TIMES_ROMAN_10
-*/
-void *font_name = GLUT_BITMAP_HELVETICA_10;
+float map_lines_width          = 1.0;
+bool  map_lines_black_to_white = true;
 
-int font_size = 10;
+bool map_points_show_coordinates  = false;
+bool map_points_opaque_background = false;
+bool map_points_ignore_size       = false;
+bool map_points_black_to_white    = true;
+
+#define FONT_NAME_DEFAULT "arial"
+
+FTFont *font_object;
+
+FTFont *font_size1_object;
+FTFont *font_size2_object;
+FTFont *font_size3_object;
+
+std::string fonts_folder = "fonts";
+
+std::string font_file = "c:/windows/fonts/arial.ttf";
+
+int font_size  = 11;
+int font_size1 = 11;
+int font_size2 = 12;
+int font_size3 = 18;
 
 float font_offset_x = 1.5;
 float font_offset_y = 1.5;
@@ -229,6 +270,10 @@ std::vector<zone_info_t>::iterator zone_infos_it;
 
 std::string zone_info_group = "Other";
 
+void init();
+void done();
+void render();
+
 float calculate_distance(float x1, float y1, float x2, float y2)
 {
     return sqrt(pow(x2 - x1, 2) + pow(y2 - y1, 2));
@@ -236,9 +281,6 @@ float calculate_distance(float x1, float y1, float x2, float y2)
 
 bool file_exists(std::string filename)
 {
-    //std::ifstream file(filename.c_str());
-    //return file.good();
-
     return std::ifstream(filename.c_str()).is_open();
 }
 
@@ -336,30 +378,39 @@ bool map_line_data_value_can_lexical_cast(std::string filename, int line_number,
     return true;
 }
 
-void draw_bitmap_characters(float x, float y, void *font, std::string text)
+float get_string_width(FTFont* font, std::string text)
 {
-    glRasterPos2f(x, y);
+    return font->Advance(text.c_str());
+}
 
-    for (unsigned int i = 0; i < text.size(); i++)
+float get_font_height(FTFont* font)
+{
+    return font->Ascender();
+}
+
+void draw_string(FTFont* font, int size, float x, float y, std::string text)
+{
+    if (font->FaceSize() != size)
     {
-        glutBitmapCharacter(font, text[i]);
+        font->FaceSize(size);
     }
-}
 
-void draw_bitmap_string(float x, float y, void *font, std::string text)
-{
     glRasterPos2f(x, y);
 
-    glutBitmapString(font, (const unsigned char*)text.c_str());
+    font->Render(text.c_str());
 }
 
-void draw_bitmap_string_background(float x, float y, void *font, int font_size, std::string text)
+void draw_string_background(FTFont* font, int size, float x, float y, std::string text)
 {
+    float string_width = get_string_width(font, text);
+
+    float font_height = get_font_height(font);
+
     glBegin(GL_QUADS);
-        glVertex2f(x                                                              - 1, y             - 0);
-        glVertex2f(x + glutBitmapLength(font, (const unsigned char*)text.c_str()) + 0, y             - 0);
-        glVertex2f(x + glutBitmapLength(font, (const unsigned char*)text.c_str()) + 0, y + font_size + 2);
-        glVertex2f(x                                                              - 1, y + font_size + 2);
+        glVertex2f(x                - 1, y                          - 0);
+        glVertex2f(x + string_width + 0, y                          - 0);
+        glVertex2f(x + string_width + 0, y + font_height + (size * 0.1));
+        glVertex2f(x                - 1, y + font_height + (size * 0.1));
     glEnd();
 }
 
@@ -383,46 +434,78 @@ void draw_point(float x, float y, float size)
     glEnd();
 }
 
+std::string get_windows_font_file(std::string name)
+{
+    char windows_folder[MAX_PATH];
+    GetWindowsDirectoryA(windows_folder, MAX_PATH);
+
+    std::stringstream windows_font_file_arial;
+    windows_font_file_arial << windows_folder << "\\Fonts\\" << name << ".ttf";
+
+    return windows_font_file_arial.str();
+}
+
+void font_load()
+{
+/*
+    if (!font_file.size())
+    {
+        return;
+    }
+*/
+
+    if (file_exists(font_file) == false)
+    {
+        font_file = get_windows_font_file(FONT_NAME_DEFAULT);
+    }
+
+    delete font_object;
+    font_object = new FTBitmapFont(font_file.c_str());
+
+    if (font_object->Error())
+    {
+        std::stringstream error_text;
+        error_text
+            << "An error occurred with FTGL."
+            << "\r\n\r\n"
+            << "Font could not be loaded."
+            << "\r\n"
+            << "File: " << font_file;
+
+        message_box_show_error(error_text.str());
+
+        return;
+    }
+
+    delete font_size1_object;
+    delete font_size2_object;
+    delete font_size3_object;
+    font_size1_object = new FTBitmapFont(font_file.c_str());
+    font_size2_object = new FTBitmapFont(font_file.c_str());
+    font_size3_object = new FTBitmapFont(font_file.c_str());
+
+    font_object->FaceSize(font_size);
+
+    font_size1_object->FaceSize(font_size1);
+    font_size2_object->FaceSize(font_size2);
+    font_size3_object->FaceSize(font_size3);
+}
+
 void window_load_background_texture()
 {
-    if (!window_background_texture_file.size())
+    if (!background_file.size())
     {
         return;
     }
 
     window_background_texture = SOIL_load_OGL_texture
     (
-        window_background_texture_file.c_str(),
+        background_file.c_str(),
 
         SOIL_LOAD_AUTO,
         SOIL_CREATE_NEW_ID,
-        0//SOIL_FLAG_INVERT_Y
+        SOIL_FLAG_COMPRESS_TO_DXT //| SOIL_FLAG_INVERT_Y
     );
-}
-
-void map_draw_info_text_toggle()
-{
-    map_draw_info_text = !map_draw_info_text;
-}
-
-void map_draw_layer0_toggle()
-{
-    map_draw_layer0 = !map_draw_layer0;
-}
-
-void map_draw_layer1_toggle()
-{
-    map_draw_layer1 = !map_draw_layer1;
-}
-
-void map_draw_layer2_toggle()
-{
-    map_draw_layer2 = !map_draw_layer2;
-}
-
-void map_draw_layer3_toggle()
-{
-    map_draw_layer3 = !map_draw_layer3;
 }
 
 void map_center()
@@ -573,6 +656,25 @@ void map_calculate_bounds()
 
     map_mid_x = reverse_sign(map_mid_x);
     map_mid_y = reverse_sign(map_mid_y);
+}
+
+void map_calculate_grid_size()
+{
+    if (map_width > 2000 || map_height > 2000)
+    {
+        map_grid_size = 1000;
+    }
+    else
+    {
+        if (map_width > 1000 || map_height > 1000)
+        {
+            map_grid_size = 500;
+        }
+        else
+        {
+            map_grid_size = 100;
+        }
+    }
 }
 
 void map_parse_file(std::string filename, int layer)
@@ -766,7 +868,7 @@ void map_load_zone(std::string zone_name)
     if (file_exists(map_filename) == true)
     {
         buffer << map_filename << " - " << APPLICATION_NAME;
-        glutSetWindowTitle(buffer.str().c_str());
+        glfwSetWindowTitle(window_object, buffer.str().c_str());
         buffer.str("");
 
         map_parse_file(map_filename, 0);
@@ -774,7 +876,7 @@ void map_load_zone(std::string zone_name)
     else
     {
         buffer << zone_name << " - " << APPLICATION_NAME;
-        glutSetWindowTitle(buffer.str().c_str());
+        glfwSetWindowTitle(window_object, buffer.str().c_str());
         buffer.str("");
     }
 
@@ -801,21 +903,7 @@ void map_load_zone(std::string zone_name)
 
     map_calculate_bounds();
 
-    if (map_width > 2000 || map_height > 2000)
-    {
-        map_grid_size = 1000;
-    }
-    else
-    {
-        if (map_width > 1000 || map_height > 1000)
-        {
-            map_grid_size = 500;
-        }
-        else
-        {
-            map_grid_size = 100;
-        }
-    }
+    map_calculate_grid_size();
 
     map_zoom_reset();
     map_center();
@@ -824,18 +912,18 @@ void map_load_zone(std::string zone_name)
 
     if (window_use_zone_specific_background_texture == true)
     {
-        std::stringstream zone_specific_background_texture_file;
-        zone_specific_background_texture_file << backgrounds_folder << "/" << map_zone_name << ".png";
+        std::stringstream zone_specific_background_file;
+        zone_specific_background_file << backgrounds_folder << "/" << map_zone_name << ".png";
 
-        if (file_exists(zone_specific_background_texture_file.str()) == true)
+        if (file_exists(zone_specific_background_file.str()) == true)
         {
-            window_background_texture_file = zone_specific_background_texture_file.str();
+            background_file = zone_specific_background_file.str();
 
             window_load_background_texture();
         }
         else
         {
-            window_background_texture_file = "background.png";
+            background_file = background_file_default;
 
             window_load_background_texture();
         }
@@ -853,261 +941,169 @@ void parse_zone_info()
 
     std::ifstream file(zones_file.c_str());
 
-    if (file.is_open())
+    if (!file.is_open())
     {
-        if (file.good() == false)
+        return;
+    }
+
+    std::string line;
+
+    while (std::getline(file, line))
+    {
+        if (line.size() == 0)
         {
-            return;
+            continue;
         }
 
-        while (file.good())
+        if (string_contains(line, "#") == true)
         {
-            std::string line;
-            std::getline(file, line);
+            continue;
+        }
 
-            if (line.size() == 0)
+        if (string_contains(line, "//") == true)
+        {
+            continue;
+        }
+
+        if (string_contains(line, "[") == true)
+        {
+            if (string_contains(line, "]") == true)
             {
+                line.erase(boost::remove_if(line, boost::is_any_of("[]")), line.end());
+                zone_info_group = line;
+
                 continue;
             }
+        }
 
-            if (string_contains(line, "#") == true)
-            {
-                continue;
-            }
+        std::vector<std::string> tokens;
 
-            if (string_contains(line, "//") == true)
-            {
-                continue;
-            }
+        boost::split(tokens, line, boost::is_any_of("="));
 
-            if (string_contains(line, "[") == true)
-            {
-                if (string_contains(line, "]") == true)
-                {
-                    line.erase(boost::remove_if(line, boost::is_any_of("[]")), line.end());
-                    zone_info_group = line;
+        if (tokens.size() == 2)
+        {
+            zone_info_t zone_info;
 
-                    continue;
-                }
-            }
+            zone_info.name_short = tokens.at(0);
+            zone_info.name_long  = tokens.at(1);
 
-            std::vector<std::string>tokens;
+            zone_info.group = zone_info_group;
 
-            boost::split(tokens, line, boost::is_any_of("="));
-
-            if (tokens.size() == 2)
-            {
-                zone_info_t zone_info;
-
-                zone_info.name_short = tokens.at(0);
-                zone_info.name_long  = tokens.at(1);
-
-                zone_info.group      = zone_info_group;
-
-                zone_infos.push_back(zone_info);
-            }
+            zone_infos.push_back(zone_info);
         }
     }
 }
 
-void keyboard(unsigned char key, int x, int y)
+static void error_callback(int error, const char* description)
 {
-    if (!TwEventKeyboardGLUT(key, x, y))
+    std::stringstream error_text;
+    error_text
+        << "An error occurred with GLFW."
+        << "\r\n\r\n"
+        << error << ": " << description;
+
+    message_box_show_error(error_text.str());
+}
+
+static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+    switch (key)
     {
+        case GLFW_KEY_UP:
+            map_scroll_up();
+            break;
 
-        switch (key)
-        {
-/*
-            case 27: // Escape
-                glutDestroyWindow(window_id);
-                exit(0);
-                break;
-*/
+        case GLFW_KEY_DOWN:
+            map_scroll_down();
+            break;
 
-            case 8: // Backspace
-                glutFullScreenToggle();
-                break;
+        case GLFW_KEY_LEFT:
+            map_scroll_left();
+            break;
 
-/*
-            case 32: // Space
-                map_zoom_reset();
-                map_center();
-                break;
+        case GLFW_KEY_RIGHT:
+            map_scroll_right();
+            break;
 
-            case 119: // w
-                map_scroll_up();
-                break;
+        case GLFW_KEY_0:
+            map_center_on_origin();
+            break;
 
-            case 115: // s
-                map_scroll_down();
-                break;
+        case GLFW_KEY_1:
+            map_zoom = 1.0;
+            break;
 
-            case 97:  // a
-                map_scroll_left();
-                break;
+        case GLFW_KEY_2:
+            map_zoom = 2.0;
+            break;
 
-            case 100: // d
-                map_scroll_right();
-                break;
-*/
+        case GLFW_KEY_3:
+            map_zoom = 3.0;
+            break;
 
-            case 48: // 0
-                map_zoom = 0.1;
-                break;
+        case GLFW_KEY_4:
+            map_zoom = 4.0;
+            break;
 
-            case 49: // 1
-                map_zoom = 1.0;
-                break;
+        case GLFW_KEY_5:
+            map_zoom = 5.0;
+            break;
 
-            case 50: // 2
-                map_zoom = 2.0;
-                break;
+        case GLFW_KEY_6:
+            map_zoom = 6.0;
+            break;
 
-            case 51: // 3
-                map_zoom = 3.0;
-                break;
+        case GLFW_KEY_7:
+            map_zoom = 7.0;
+            break;
 
-            case 52: // 4
-                map_zoom = 4.0;
-                break;
+        case GLFW_KEY_8:
+            map_zoom = 8.0;
+            break;
 
-            case 53: // 5
-                map_zoom = 5.0;
-                break;
-
-            case 54: // 6
-                map_zoom = 6.0;
-                break;
-
-            case 55: // 7
-                map_zoom = 7.0;
-                break;
-
-            case 56: // 8
-                map_zoom = 8.0;
-                break;
-
-            case 57: // 9
-                map_zoom = 9.0;
-                break;
-/*
-            case 13: // Enter
-                map_zoom_reset();
-                break;
-
-            case 43: // Numpad Add
-            case 61: // = +
-            case 93: // } ]
-                map_zoom_in();
-                break;
-
-            case 45: // Numpad Subtract or - _
-            case 91: // { [
-                map_zoom_out();
-                break;
-*/
-        }
-
+        case GLFW_KEY_9:
+            map_zoom = 9.0;
+            break;
     }
 }
 
-void special(int key, int x, int y)
+static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 {
-    if (!TwEventSpecialGLUT(key, x, y))
+    if (!TwEventMouseButtonGLFW(button, action))
     {
 
-        switch (key)
+        if (action == GLFW_RELEASE)
         {
-/*
-            case GLUT_KEY_F5:
-                map_zoom_reset();
-                map_center();
-                break;
-
-            case GLUT_KEY_F10:
-                map_draw_info_text_toggle();
-                break;
-
-            case GLUT_KEY_F11:
-                glutFullScreenToggle();
-                break;
-*/
-
-            case GLUT_KEY_UP:
-                map_scroll_up();
-                break;
-
-            case GLUT_KEY_DOWN:
-                map_scroll_down();
-                break;
-
-            case GLUT_KEY_LEFT:
-                map_scroll_left();
-                break;
-
-            case GLUT_KEY_RIGHT:
-                map_scroll_right();
-                break;
-
-/*
-            case GLUT_KEY_HOME:
-                map_center();
-                break;
-
-            case GLUT_KEY_END:
-                map_zoom_reset();
-                break;
-
-            case GLUT_KEY_PAGE_UP:
-                map_zoom_in();
-                break;
-
-            case GLUT_KEY_PAGE_DOWN:
-                map_zoom_out();
-                break;
-*/
+            SetCursor(LoadCursor(NULL, IDC_ARROW));
         }
 
-    }
-}
-
-void mouse(int button, int state, int x, int y)
-{
-    if (!TwEventMouseButtonGLUT(button, state, x, y))
-    {
-
-        if (state == GLUT_UP)
-        {
-            glutSetCursor(GLUT_CURSOR_LEFT_ARROW);
-        }
-
-        if (button == GLUT_LEFT_BUTTON && state == GLUT_UP)
+        if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
         {
             mouse_dragging = false;
         }
 
-        if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN)
+        if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS)
         {
-            glutSetCursor(GLUT_CURSOR_CYCLE);
+            SetCursor(LoadCursor(NULL, IDC_SIZEALL));
 
-            mouse_dragging_start_x = x;
-            mouse_dragging_start_y = y;
+            mouse_dragging_start_x = mouse_x;
+            mouse_dragging_start_y = mouse_y;
 
             mouse_dragging = true;
         }
 
-        if (button == GLUT_RIGHT_BUTTON && state == GLUT_DOWN)
+        if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS)
         {
-            glutSetCursor(GLUT_CURSOR_CROSSHAIR);
+            SetCursor(LoadCursor(NULL, IDC_CROSS));
         }
 
-        if (button == GLUT_RIGHT_BUTTON && state == GLUT_UP)
+        if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE)
         {
-            map_offset_x = map_offset_x + (map_origin_x - x) * map_zoom;
-            map_offset_y = map_offset_y + (map_origin_y - y) * map_zoom;
+            map_offset_x = map_offset_x + (map_origin_x - mouse_x) * map_zoom;
+            map_offset_y = map_offset_y + (map_origin_y - mouse_y) * map_zoom;
         }
 
-        if (button == GLUT_MIDDLE_BUTTON && state == GLUT_UP)
+        if (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_RELEASE)
         {
             map_zoom_reset();
             map_center();
@@ -1116,26 +1112,39 @@ void mouse(int button, int state, int x, int y)
     }
 }
 
-void mouse_wheel(int button, int direction, int x, int y)
+static void scroll_callback(GLFWwindow* window, double x, double y)
 {
-    if (direction > 0)
+    static int mouse_wheel_pos = 0;
+    mouse_wheel_pos += (int)y;
+
+    int result = TwMouseWheel(mouse_wheel_pos);
+
+    if (!result)
     {
-        map_zoom_in();
-    }
-    else
-    {
-        map_zoom_out();
+
+        if (y > 0)
+        {
+            map_zoom_in();
+        }
+        else
+        {
+            map_zoom_out();
+        }
+
     }
 }
 
-void motion(int x, int y)
+static void cursor_pos_callback(GLFWwindow* window, double x, double y)
 {
-    if (!TwEventMouseMotionGLUT(x, y))
+    mouse_x = x;
+    mouse_y = y;
+
+    if (!TwEventMousePosGLFW(x, y))
     {
 
         if (mouse_dragging == true)
         {
-            glutSetCursor(GLUT_CURSOR_CYCLE);
+            SetCursor(LoadCursor(NULL, IDC_SIZEALL));
 
             map_offset_x += (x - mouse_dragging_start_x) * map_zoom;
             map_offset_y += (y - mouse_dragging_start_y) * map_zoom;
@@ -1147,25 +1156,33 @@ void motion(int x, int y)
     }
 }
 
-void reshape(int w, int h)
+void viewport_and_ortho()
 {
-    window_width  = w;
-    window_height = h;
-
-    map_origin_x = window_width  / 2;
-    map_origin_y = window_height / 2;
-
     glViewport(0, 0, window_width, window_height);
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
 
-    glOrtho(0, window_width, window_height, 0, 0, 1);
+    //glOrtho(0, window_width, 0, window_height, -1, 1);
+    glOrtho(0, window_width, window_height, 0, -1, 1); // y-axis is flipped, origin is top-left of window
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
+}
+
+void window_size_callback(GLFWwindow* window, int width, int height)
+{
+    window_width  = width;
+    window_height = height;
+
+    map_origin_x = window_width  / 2;
+    map_origin_y = window_height / 2;
+
+    viewport_and_ortho();
 
     TwWindowSize(window_width, window_height);
+
+    render();
 }
 
 void render()
@@ -1198,6 +1215,8 @@ void render()
 
     if (map_draw_lines == true)
     {
+        glLineWidth(map_lines_width);
+
         glBegin(GL_LINES);
 
         map_lines_visible = 0;
@@ -1212,11 +1231,21 @@ void render()
                 {
                     continue;
                 }
+
+                if (map_draw_lines_layer0 == false)
+                {
+                    continue;
+                }
             }
 
             if (layer == 1)
             {
                 if (map_draw_layer1 == false)
+                {
+                    continue;
+                }
+
+                if (map_draw_lines_layer1 == false)
                 {
                     continue;
                 }
@@ -1228,11 +1257,21 @@ void render()
                 {
                     continue;
                 }
+
+                if (map_draw_lines_layer2 == false)
+                {
+                    continue;
+                }
             }
 
             if (layer == 3)
             {
                 if (map_draw_layer3 == false)
+                {
+                    continue;
+                }
+
+                if (map_draw_lines_layer3 == false)
                 {
                     continue;
                 }
@@ -1296,11 +1335,14 @@ void render()
                 continue;
             }
 
-            if (map_line.r == 0 && map_line.g == 0 && map_line.b == 0)
+            if (map_lines_black_to_white == true)
             {
-                map_line.r = 255;
-                map_line.g = 255;
-                map_line.b = 255;
+                if (map_line.r == 0 && map_line.g == 0 && map_line.b == 0)
+                {
+                    map_line.r = 255;
+                    map_line.g = 255;
+                    map_line.b = 255;
+                }
             }
 
             glColor3ub(map_line.r, map_line.g, map_line.b);
@@ -1323,6 +1365,8 @@ void render()
 
     if (map_draw_grid == true)
     {
+        float font_height = get_font_height(font_object);
+
         float origin_map_x = map_origin_x + (map_offset_x / map_zoom);
         float origin_map_y = map_origin_y + (map_offset_y / map_zoom);
 
@@ -1346,15 +1390,19 @@ void render()
         {
             std::string origin_label = "0";
 
-            int origin_label_length = glutBitmapLength(font_name, (const unsigned char*)origin_label.c_str());
+            float origin_label_length = get_string_width(font_object, origin_label);
 
-            draw_bitmap_string(origin_map_x - (origin_label_length / 2), min_map_y - (font_size * font_offset_y), font_name, origin_label);
+            // north
+            draw_string(font_object, font_size, origin_map_x - (origin_label_length / 2), min_map_y - font_height,                     origin_label);
 
-            draw_bitmap_string(origin_map_x - (origin_label_length / 2), max_map_y + (font_size * font_offset_y), font_name, origin_label);
+            // south
+            draw_string(font_object, font_size, origin_map_x - (origin_label_length / 2), max_map_y + font_height + (font_height / 2), origin_label);
 
-            draw_bitmap_string(min_map_x - (font_size * font_offset_y) - origin_label_length, origin_map_y + (font_size / 2), font_name, origin_label);
+            // west
+            draw_string(font_object, font_size, min_map_x - font_height - origin_label_length, origin_map_y + (font_height / 2), origin_label);
 
-            draw_bitmap_string(max_map_x + (font_size * font_offset_y), origin_map_y + (font_size / 2), font_name, origin_label);
+            // east
+            draw_string(font_object, font_size, max_map_x + font_height,                       origin_map_y + (font_height / 2), origin_label);
         }
 
         glColor3f(map_grid_color[0] / 2, map_grid_color[1] / 2, map_grid_color[2] / 2);
@@ -1366,56 +1414,6 @@ void render()
         //glBegin(GL_LINES);
 
         int grid_num_lines = 0;
-
-        float distance_west = abs(map_min_x) / map_zoom;
-
-        grid_num_lines = (int)(distance_west / (map_grid_size / map_zoom));
-
-        for (int i = 1; i < grid_num_lines + 1; i++)
-        {
-            float next_x = origin_map_x - ((i * map_grid_size) / map_zoom);
-
-            glBegin(GL_LINES);
-                glVertex2f(next_x, min_map_y);
-                glVertex2f(next_x, max_map_y);
-            glEnd();
-
-            if (map_draw_grid_coordinates == true)
-            {
-                std::stringstream grid_size_label;
-                grid_size_label << i * map_grid_size;
-
-                int grid_size_label_length = glutBitmapLength(font_name, (const unsigned char*)grid_size_label.str().c_str());
-
-                draw_bitmap_string(next_x - (grid_size_label_length / 2), min_map_y - (font_size * font_offset_y), font_name, grid_size_label.str());
-                draw_bitmap_string(next_x - (grid_size_label_length / 2), max_map_y + (font_size * font_offset_y), font_name, grid_size_label.str());
-            }
-        }
-
-        float distance_east = abs(map_max_x) / map_zoom;
-
-        grid_num_lines = (int)(distance_east / (map_grid_size / map_zoom));
-
-        for (int i = 1; i < grid_num_lines + 1; i++)
-        {
-            float next_x = origin_map_x + ((i * map_grid_size) / map_zoom);
-
-            glBegin(GL_LINES);
-                glVertex2f(next_x, min_map_y);
-                glVertex2f(next_x, max_map_y);
-            glEnd();
-
-            if (map_draw_grid_coordinates == true)
-            {
-                std::stringstream grid_size_label;
-                grid_size_label << "-" << i * map_grid_size;
-
-                int grid_size_label_length = glutBitmapLength(font_name, (const unsigned char*)grid_size_label.str().c_str());
-
-                draw_bitmap_string(next_x - (grid_size_label_length / 2), min_map_y - (font_size * font_offset_y), font_name, grid_size_label.str());
-                draw_bitmap_string(next_x - (grid_size_label_length / 2), max_map_y + (font_size * font_offset_y), font_name, grid_size_label.str());
-            }
-        }
 
         float distance_north = abs(map_min_y) / map_zoom;
 
@@ -1435,10 +1433,13 @@ void render()
                 std::stringstream grid_size_label;
                 grid_size_label << i * map_grid_size;
 
-                int grid_size_label_length = glutBitmapLength(font_name, (const unsigned char*)grid_size_label.str().c_str());
+                float grid_size_label_length = get_string_width(font_object, grid_size_label.str());
 
-                draw_bitmap_string(min_map_x - (font_size * font_offset_y) - grid_size_label_length, next_y + (font_size / 2), font_name, grid_size_label.str());
-                draw_bitmap_string(max_map_x + (font_size * font_offset_y), next_y + (font_size / 2), font_name, grid_size_label.str());
+                // west
+                draw_string(font_object, font_size, min_map_x - font_height - grid_size_label_length, next_y + (font_height / 2), grid_size_label.str());
+
+                // east
+                draw_string(font_object, font_size, max_map_x + font_height,                          next_y + (font_height / 2), grid_size_label.str());
             }
         }
 
@@ -1460,10 +1461,69 @@ void render()
                 std::stringstream grid_size_label;
                 grid_size_label << "-" << i * map_grid_size;
 
-                int grid_size_label_length = glutBitmapLength(font_name, (const unsigned char*)grid_size_label.str().c_str());
+                float grid_size_label_length = get_string_width(font_object, grid_size_label.str());
 
-                draw_bitmap_string(min_map_x - (font_size * font_offset_y) - grid_size_label_length, next_y + (font_size / 2), font_name, grid_size_label.str());
-                draw_bitmap_string(max_map_x + (font_size * font_offset_y), next_y + (font_size / 2), font_name, grid_size_label.str());
+                // west
+                draw_string(font_object, font_size, min_map_x - font_height - grid_size_label_length, next_y + (font_height / 2), grid_size_label.str());
+
+                // east
+                draw_string(font_object, font_size, max_map_x + font_height,                          next_y + (font_height / 2), grid_size_label.str());
+            }
+        }
+
+        float distance_west = abs(map_min_x) / map_zoom;
+
+        grid_num_lines = (int)(distance_west / (map_grid_size / map_zoom));
+
+        for (int i = 1; i < grid_num_lines + 1; i++)
+        {
+            float next_x = origin_map_x - ((i * map_grid_size) / map_zoom);
+
+            glBegin(GL_LINES);
+                glVertex2f(next_x, min_map_y);
+                glVertex2f(next_x, max_map_y);
+            glEnd();
+
+            if (map_draw_grid_coordinates == true)
+            {
+                std::stringstream grid_size_label;
+                grid_size_label << i * map_grid_size;
+
+                float grid_size_label_length = get_string_width(font_object, grid_size_label.str());
+
+                // north
+                draw_string(font_object, font_size, next_x - (grid_size_label_length / 2), min_map_y - font_height,                     grid_size_label.str());
+
+                // south
+                draw_string(font_object, font_size, next_x - (grid_size_label_length / 2), max_map_y + font_height + (font_height / 2), grid_size_label.str());
+            }
+        }
+
+        float distance_east = abs(map_max_x) / map_zoom;
+
+        grid_num_lines = (int)(distance_east / (map_grid_size / map_zoom));
+
+        for (int i = 1; i < grid_num_lines + 1; i++)
+        {
+            float next_x = origin_map_x + ((i * map_grid_size) / map_zoom);
+
+            glBegin(GL_LINES);
+                glVertex2f(next_x, min_map_y);
+                glVertex2f(next_x, max_map_y);
+            glEnd();
+
+            if (map_draw_grid_coordinates == true)
+            {
+                std::stringstream grid_size_label;
+                grid_size_label << "-" << i * map_grid_size;
+
+                float grid_size_label_length = get_string_width(font_object, grid_size_label.str());
+
+                // north
+                draw_string(font_object, font_size, next_x - (grid_size_label_length / 2), min_map_y - font_height,                     grid_size_label.str());
+
+                // south
+                draw_string(font_object, font_size, next_x - (grid_size_label_length / 2), max_map_y + font_height + (font_height / 2), grid_size_label.str());
             }
         }
 
@@ -1546,45 +1606,54 @@ void render()
                 continue;
             }
 
-            if (map_point.r == 0 && map_point.g == 0 && map_point.b == 0)
+            if (map_points_black_to_white == true)
             {
-                map_point.r = 255;
-                map_point.g = 255;
-                map_point.b = 255;
+                if (map_point.r == 0 && map_point.g == 0 && map_point.b == 0)
+                {
+                    map_point.r = 255;
+                    map_point.g = 255;
+                    map_point.b = 255;
+                }
             }
 
-            int point_font_size   = font_size;
-            void *point_font_name = font_name;
+            FTFont* point_font_object = font_size1_object;
+
+            int point_font_size = font_size1;
+
+            float point_font_height = get_font_height(font_size1_object);
 
             if (map_points_ignore_size == false)
             {
-                if (map_point.size == 1)
+                switch (map_point.size)
                 {
-                    point_font_size = 10;
-                    point_font_name = GLUT_BITMAP_HELVETICA_10;
-                }
+                    case 1:
+                        point_font_object = font_size1_object;
+                        point_font_size   = font_size1;
+                        point_font_height = get_font_height(font_size1_object);
+                        break;
 
-                if (map_point.size == 2)
-                {
-                    point_font_size = 12;
-                    point_font_name = GLUT_BITMAP_HELVETICA_12;
-                }
+                    case 2:
+                        point_font_object = font_size1_object;
+                        point_font_size   = font_size2;
+                        point_font_height = get_font_height(font_size2_object);
+                        break;
 
-                if (map_point.size == 3)
-                {
-                    point_font_size = 18;
-                    point_font_name = GLUT_BITMAP_HELVETICA_18;
+                    case 3:
+                        point_font_object = font_size2_object;
+                        point_font_size   = font_size3;
+                        point_font_height = get_font_height(font_size3_object);
+                        break;
                 }
             }
 
-            if (map_draw_points_opaque == true)
+            if (map_points_opaque_background == true)
             {
                 float point_background_x = point_map_x;
-                float point_background_y = point_map_y + (point_font_size * font_offset_y) - point_font_size;
+                float point_background_y = point_map_y + (point_font_height + (point_font_size * 0.1)) - point_font_height;
 
                 glColor3ub(0, 0, 128);
 
-                draw_bitmap_string_background(point_background_x, point_background_y, point_font_name, point_font_size, map_point.text);
+                draw_string_background(point_font_object, point_font_size, point_background_x, point_background_y, map_point.text);
 
                 glColor3ub(255, 255, 255);
             }
@@ -1595,9 +1664,9 @@ void render()
 
             draw_plus(point_map_x, point_map_y, 4);
 
-            draw_bitmap_string(point_map_x, point_map_y + (point_font_size * font_offset_y), point_font_name, map_point.text);
+            draw_string(point_font_object, point_font_size, point_map_x, point_map_y + (point_font_height + (point_font_size * 0.1)), map_point.text);
 
-            if (map_draw_points_coordinates == true)
+            if (map_points_show_coordinates == true)
             {
                 float loc_y = reverse_sign(map_point.y);
                 float loc_x = reverse_sign(map_point.x);
@@ -1605,14 +1674,14 @@ void render()
                 std::stringstream map_point_coordinates_text;
                 map_point_coordinates_text << std::setprecision(2) << std::fixed << "(" << loc_y << ", " << loc_x << ")";
 
-                if (map_draw_points_opaque == true)
+                if (map_points_opaque_background == true)
                 {
                     float point_background_x = point_map_x;
-                    float point_background_y = point_map_y + ((point_font_size * font_offset_y) * 2) - point_font_size;
+                    float point_background_y = point_map_y + ((point_font_height + (point_font_size * 0.1)) * 2) - point_font_height;
 
                     glColor3ub(0, 0, 128);
 
-                    draw_bitmap_string_background(point_background_x, point_background_y, point_font_name, point_font_size, map_point_coordinates_text.str());
+                    draw_string_background(point_font_object, point_font_size, point_background_x, point_background_y, map_point_coordinates_text.str());
 
                     glColor3ub(255, 255, 255);
                 }
@@ -1621,7 +1690,7 @@ void render()
                     //glColor3ub(map_point.r, map_point.g, map_point.b);
                 //}
 
-                draw_bitmap_string(point_map_x, point_map_y + ((point_font_size * font_offset_y) * 2), point_font_name, map_point_coordinates_text.str());
+                draw_string(point_font_object, point_font_size, point_map_x, point_map_y + ((point_font_height + (point_font_size * 0.1)) * 2), map_point_coordinates_text.str());
             }
 
             map_points_visible++;
@@ -1642,9 +1711,11 @@ void render()
         float origin_map_x = map_origin_x + (map_offset_x / map_zoom);
         float origin_map_y = map_origin_y + (map_offset_y / map_zoom);
 
+        float font_height = get_font_height(font_object);
+
         draw_point(origin_map_x, origin_map_y, 4);
 
-        draw_bitmap_string(origin_map_x, origin_map_y + (font_size * font_offset_y), font_name, "Origin (0, 0)");
+        draw_string(font_object, font_size, origin_map_x, origin_map_y + (font_height + (font_size * 0.1)), origin_text);
     }
 
     if (map_zoom_to_fit == true)
@@ -1699,13 +1770,13 @@ void render()
 
     if (map_draw_info_text == true)
     {
-        glColor3f(1.0, 0, 1.0);
+        glColor3f(1.0, 0.0, 1.0);
 
         std::vector<std::string> map_info_text;
 
         std::stringstream map_info_text_buffer;
 
-        map_info_text_buffer << "FPS: " << frames_per_second;
+        map_info_text_buffer << "FPS: " << std::setprecision(2) << std::fixed << frames_per_second;
         map_info_text.push_back(map_info_text_buffer.str());
         map_info_text_buffer.str("");
 
@@ -1713,7 +1784,7 @@ void render()
         map_info_text.push_back(map_info_text_buffer.str());
         map_info_text_buffer.str("");
 
-        map_info_text_buffer << "Zoom: " << map_zoom;
+        map_info_text_buffer << "Zoom: " << std::setprecision(2) << std::fixed << map_zoom;
         map_info_text.push_back(map_info_text_buffer.str());
         map_info_text_buffer.str("");
 
@@ -1757,46 +1828,44 @@ void render()
         map_info_text.push_back(map_info_text_buffer.str());
         map_info_text_buffer.str("");
 
+        float font_height = get_font_height(font_object);
+
         int map_info_text_index = 1;
         foreach (std::string map_info_text_value, map_info_text)
         {
-            draw_bitmap_string(0, 0 + (font_size * map_info_text_index), font_name, map_info_text_value);
+            draw_string(font_object, font_size, 0 + (font_size * 0.1), 0 + ((font_height + (font_size * 0.1)) * map_info_text_index), map_info_text_value);
             map_info_text_index++;
         }
     }
 
     TwDraw();
 
-    glutSwapBuffers();
-
-    glutPostRedisplay();
+    glfwSwapBuffers(window_object);
 }
 
-void idle()
-{
-    glutPostRedisplay();
-}
-
-void init_gl()
+void init()
 {
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
 
-    glFrontFace(GL_CW);
-
     glClearColor(0, 0, 0, 1);
 
-    glViewport(0, 0, window_width, window_height);
-
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-
-    glOrtho(0, window_width, window_height, 0, 0, 1);
+    viewport_and_ortho();
 }
 
 void done()
 {
+    delete font_object;
+
+    delete font_size1_object;
+    delete font_size2_object;
+    delete font_size3_object;
+
+    glfwDestroyWindow(window_object);
+
+    glfwTerminate();
+
     TwTerminate();
 }
 
@@ -1807,12 +1876,19 @@ void TW_CALL CopyStdStringToClient(std::string& destinationClientString, const s
 
 void TW_CALL bar_error_handler(const char *error_message)
 {
-    assert(error_message == NULL);
+    anttweakbar_last_error = error_message;
 }
 
+/*
 void TW_CALL bar_options_button_toggle_fullscreen(void *)
 {
-    glutFullScreenToggle();
+    //
+}
+*/
+
+void TW_CALL bar_options_button_load_font(void *)
+{
+    font_load();
 }
 
 void TW_CALL bar_options_button_load_background_texture(void *)
@@ -1825,9 +1901,34 @@ void TW_CALL bar_options_button_load_zone(void *)
     map_load_zone(map_zone_name);
 }
 
+void TW_CALL bar_options_button_offset_up(void *)
+{
+    map_scroll_up();
+}
+
+void TW_CALL bar_options_button_offset_down(void *)
+{
+    map_scroll_down();
+}
+
+void TW_CALL bar_options_button_offset_left(void *)
+{
+    map_scroll_left();
+}
+
+void TW_CALL bar_options_button_offset_right(void *)
+{
+    map_scroll_right();
+}
+
 void TW_CALL bar_options_button_reset_height_filter(void *)
 {
     map_calculate_bounds();
+}
+
+void TW_CALL bar_options_button_center_on_origin(void *)
+{
+    map_center_on_origin();
 }
 
 void TW_CALL bar_options_button_zoom_to_fit(void *)
@@ -1845,7 +1946,7 @@ void TW_CALL bar_options_button_reset_zoom_and_center_map(void *)
 
 void TW_CALL bar_options_button_exit(void *)
 {
-    glutLeaveMainLoop();
+    glfwSetWindowShouldClose(window_object, GL_TRUE);
 }
 
 void bar_zones_create();
@@ -1924,7 +2025,7 @@ void bar_zones_create()
             continue;
         }
 
-        vp = static_cast<void*>(new std::string(zone_info.name_short));
+        vp = static_cast<void *>(new std::string(zone_info.name_short));
 
         std::string zone_info_group_no_spaces = boost::replace_all_copy(zone_info.group, " ", "");
 
@@ -1957,14 +2058,31 @@ void bar_options_create()
         " group=Window label='Width: ' help='Width of the map window' ");
     TwAddVarRO(bar_options, "WindowHeight", TW_TYPE_UINT32, &window_height,
         " group=Window label='Height: ' help='Height of the map window' ");
+/*
     TwAddButton(bar_options, "ToggleFullscreen", bar_options_button_toggle_fullscreen, NULL,
         " group=Window label='Toggle Fullscreen' help='Switch between windowed mode and fullscreen mode' key='F11' ");
+*/
+    TwAddVarRW(bar_options, "FontFile", TW_TYPE_STDSTRING, &font_file,
+        " group=Font label='File: ' help='Font file used for drawing text' ");
+    TwAddButton(bar_options, "FontLoad", bar_options_button_load_font, NULL,
+        " group=Font label='Load Font' help='Load the font' key='f' ");
+    TwAddVarRW(bar_options, "FontSize", TW_TYPE_INT32, &font_size,
+        " group=Font label='Size: ' help='Size of drawn text' min=1 ");
+    TwAddVarRW(bar_options, "FontSize1", TW_TYPE_INT32, &font_size1,
+        " group=Font label='Point Size 1: ' help='Size of drawn text for points' min=1 ");
+    TwAddVarRW(bar_options, "FontSize2", TW_TYPE_INT32, &font_size2,
+        " group=Font label='Point Size 2: ' help='Size of drawn text for points' min=1 ");
+    TwAddVarRW(bar_options, "FontSize3", TW_TYPE_INT32, &font_size3,
+        " group=Font label='Point Size 3: ' help='Size of drawn text for points' min=1 ");
+    TwAddSeparator(bar_options, NULL, " group=Bounds ");
+
+    TwDefine(" Options/Font group=Window ");
 
     TwAddVarRW(bar_options, "WindowUseBackgroundTexture", TW_TYPE_BOOLCPP, &window_use_background_texture,
         " group=Background label='Enabled' help='Use an image as the background for the window' key='b' ");
     TwAddVarRW(bar_options, "WindowUseZoneSpecificBackgroundTexture", TW_TYPE_BOOLCPP, &window_use_zone_specific_background_texture,
         " group=Background label='Use Zone Specific Textures' help='Use an image that is specific to the current map as the background for the window' key='B' ");
-    TwAddVarRW(bar_options, "WindowBackgroundTextureFile", TW_TYPE_STDSTRING, &window_background_texture_file,
+    TwAddVarRW(bar_options, "BackgroundFile", TW_TYPE_STDSTRING, &background_file,
         " group=Background label='Texture File: ' help='Image file used as the background for the window' ");
     TwAddButton(bar_options, "WindowLoadBackgroundTexture", bar_options_button_load_background_texture, NULL,
         " group=Background label='Load Texture' help='Load the background texture' key='t' ");
@@ -2006,12 +2124,25 @@ void bar_options_create()
     TwAddVarRW(bar_options, "MapOffsetY", TW_TYPE_FLOAT, &map_offset_y,
         " group=Map label='Offset Y: ' help='Offset from the origin on the Y-axis' step=1 precision=2 ");
 
+    TwAddButton(bar_options, "MapOffsetUp", bar_options_button_offset_up, NULL,
+        " group=Offset label='Up' help='Move around the map' key='Up' ");
+    TwAddButton(bar_options, "MapOffsetDown", bar_options_button_offset_down, NULL,
+        " group=Offset label='Down' help='Move around the map' key='Down' ");
+    TwAddButton(bar_options, "MapOffsetLeft", bar_options_button_offset_left, NULL,
+        " group=Offset label='Left' help='Move around the map' key='Left' ");
+    TwAddButton(bar_options, "MapOffsetRight", bar_options_button_offset_right, NULL,
+        " group=Offset label='Right' help='Move around the map' key='Right' ");
+
+    TwDefine(" Options/Offset group=Map ");
+
+    TwDefine(" Options/Offset opened=false ");
+
     TwAddVarRW(bar_options, "MapDrawLines", TW_TYPE_BOOLCPP, &map_draw_lines,
         " group=Draw label='Lines' help='Draw the lines of the map' key='l' ");
     TwAddVarRW(bar_options, "MapDrawPoints", TW_TYPE_BOOLCPP, &map_draw_points,
-        " group=Draw label='Points' help='Draw the points or text labels of the map' key='p' ");
+        " group=Draw label='Points' help='Draw the points of the map' key='p' ");
     TwAddVarRW(bar_options, "MapDrawOrigin", TW_TYPE_BOOLCPP, &map_draw_origin,
-        " group=Draw label='Origin' help='Draw a label at the origin coordinates 0,0' key='o' ");
+        " group=Draw label='Origin' help='Draw a point at the origin coordinates 0,0' key='o' ");
 
     TwDefine(" Options/Draw group=Map ");
 
@@ -2026,23 +2157,43 @@ void bar_options_create()
 
     TwDefine(" Options/Layers group=Map ");
 
+    TwAddVarRW(bar_options, "MapLinesWidth", TW_TYPE_FLOAT, &map_lines_width,
+        " group=Lines label='Width: ' help='How wide or thick the map lines are drawn' min=1 max=10 step=1 precision=0 ");
+    TwAddVarRW(bar_options, "MapLinesBlackToWhite", TW_TYPE_BOOLCPP, &map_lines_black_to_white,
+        " group=Lines label='Black -> White' help='Change the color of lines from black to white for visibility on dark backgrounds' ");
+
+    TwAddSeparator(bar_options, NULL, " group=Lines ");
+
+    TwAddVarRW(bar_options, "MapDrawLinesLayer0", TW_TYPE_BOOLCPP, &map_draw_lines_layer0,
+        " group=Lines label='Base' help='Draw the lines of the base map layer' ");
+    TwAddVarRW(bar_options, "MapDrawLinesLayer1", TW_TYPE_BOOLCPP, &map_draw_lines_layer1,
+        " group=Lines label='Layer 1' help='Draw the lines of the first map layer' ");
+    TwAddVarRW(bar_options, "MapDrawLinesLayer2", TW_TYPE_BOOLCPP, &map_draw_lines_layer2,
+        " group=Lines label='Layer 2' help='Draw the lines of the second map layer' ");
+    TwAddVarRW(bar_options, "MapDrawLinesLayer3", TW_TYPE_BOOLCPP, &map_draw_lines_layer3,
+        " group=Lines label='Layer 3' help='Draw the lines of the third map layer' ");
+
+    TwDefine(" Options/Lines group=Map ");
+
     TwAddVarRW(bar_options, "MapPointsIgnoreSize", TW_TYPE_BOOLCPP, &map_points_ignore_size,
-        " group=Points label='Ignore Size' help='Always use the smallest size for points or text labels of the map' ");
-    TwAddVarRW(bar_options, "MapDrawPointsCoordinates", TW_TYPE_BOOLCPP, &map_draw_points_coordinates,
-        " group=Points label='Show /loc Coordinates' help='Show the /loc coordinates for points or text labels of the map' key='P' ");
-    TwAddVarRW(bar_options, "MapDrawPointsOpaque", TW_TYPE_BOOLCPP, &map_draw_points_opaque,
-        " group=Points label='Opaque Background' help='Draw an opaque background behind points or text labels of the map' ");
+        " group=Points label='Ignore Size' help='Always use the smallest size for points of the map' ");
+    TwAddVarRW(bar_options, "MapPointsShowCoordinates", TW_TYPE_BOOLCPP, &map_points_show_coordinates,
+        " group=Points label='Show Coordinates' help='Show the /loc coordinates for points of the map' key='P' ");
+    TwAddVarRW(bar_options, "MapPointsOpaqueBackground", TW_TYPE_BOOLCPP, &map_points_opaque_background,
+        " group=Points label='Opaque Background' help='Draw an opaque background behind points of the map' ");
+    TwAddVarRW(bar_options, "MapPointsBlackToWhite", TW_TYPE_BOOLCPP, &map_points_black_to_white,
+        " group=Points label='Black -> White' help='Change the color of points from black to white for visibility on dark backgrounds' ");
 
     TwAddSeparator(bar_options, NULL, " group=Points ");
 
     TwAddVarRW(bar_options, "MapDrawPointsLayer0", TW_TYPE_BOOLCPP, &map_draw_points_layer0,
-        " group=Points label='Base' help='Draw the points or text labels of the base map layer' ");
+        " group=Points label='Base' help='Draw the points of the base map layer' ");
     TwAddVarRW(bar_options, "MapDrawPointsLayer1", TW_TYPE_BOOLCPP, &map_draw_points_layer1,
-        " group=Points label='Layer 1' help='Draw the points or text labels of the first map layer' ");
+        " group=Points label='Layer 1' help='Draw the points of the first map layer' ");
     TwAddVarRW(bar_options, "MapDrawPointsLayer2", TW_TYPE_BOOLCPP, &map_draw_points_layer2,
-        " group=Points label='Layer 2' help='Draw the points or text labels of the second map layer' ");
+        " group=Points label='Layer 2' help='Draw the points of the second map layer' ");
     TwAddVarRW(bar_options, "MapDrawPointsLayer3", TW_TYPE_BOOLCPP, &map_draw_points_layer3,
-        " group=Points label='Layer 3' help='Draw the points or text labels of the third map layer' ");
+        " group=Points label='Layer 3' help='Draw the points of the third map layer' ");
 
     TwDefine(" Options/Points group=Map ");
 
@@ -2052,7 +2203,7 @@ void bar_options_create()
         " group=HeightFilter label='Maximum Z-Axis: ' help='Filters out lines above this height' keyIncr='SHIFT+PGUP' keyDecr='SHIFT+PGDOWN' step=1 precision=2 ");
 
     TwAddButton(bar_options, "ResetHeightFilter", bar_options_button_reset_height_filter, NULL,
-        " group=HeightFilter label='Reset Height Filter' help='Reset the Z-axis values for the height filter' key='F9' ");
+        " group=HeightFilter label='Reset Height Filter' help='Reset the Z-axis values for the height filter' key='h' ");
 
     TwDefine(" Options/HeightFilter label='Height Filter' group=Map ");
 
@@ -2090,11 +2241,14 @@ void bar_options_create()
         TwAddVarRW(bar_options, "MapDrawGridCoordinates", TW_TYPE_BOOLCPP, &map_draw_grid_coordinates,
         " group=Grid label='Coordinates' help='Draw the grid coordinates' key='G' ");
     TwAddVarRW(bar_options, "MapGridSize", TW_TYPE_FLOAT, &map_grid_size,
-        " group=Grid label='Size: ' ");
+        " group=Grid label='Size: ' help='Interval between grid lines and coordinates' min=1 precision=0 ");
     TwAddVarRW(bar_options, "MapGridColor", TW_TYPE_COLOR3F, &map_grid_color,
         " group=Grid label='Color: ' help='Change the color of the grid' ");
 
     TwDefine(" Options/Grid group=Map ");
+
+    TwAddButton(bar_options, "CenterOnOrigin", bar_options_button_center_on_origin, NULL,
+        " group=Map label='Center Map on Origin' help='Center the map on the origin coordiantes' key='0' ");
 
     TwAddButton(bar_options, "ZoomToFit", bar_options_button_zoom_to_fit, NULL,
         " group=Map label='Zoom Map to Fit Window' help='Zoom out until the entire map is visible inside the window' key='z' ");
@@ -2128,7 +2282,18 @@ void map_load_config()
 
     window_use_zone_specific_background_texture = pt.get<bool>("Window.UseZoneSpecificBackgroundTexture", window_use_zone_specific_background_texture);
 
-    window_background_texture_file = pt.get<std::string>("Window.BackgroundTextureFile", window_background_texture_file);
+    backgrounds_folder = pt.get<std::string>("Backgrounds.Folder", backgrounds_folder);
+    background_file    = pt.get<std::string>("Backgrounds.File",   background_file);
+
+    fonts_folder = pt.get<std::string>("Fonts.Folder", fonts_folder);
+    font_file    = pt.get<std::string>("Fonts.File",   font_file);
+
+    font_size  = pt.get<int>("Fonts.Size",       font_size);
+    font_size1 = pt.get<int>("Fonts.PointSize1", font_size1);
+    font_size2 = pt.get<int>("Fonts.PointSize2", font_size2);
+    font_size3 = pt.get<int>("Fonts.PointSize3", font_size3);
+
+    map_folder = pt.get<std::string>("Map.Folder", map_folder);
 
     zones_file = pt.get<std::string>("Zones.File", zones_file);
 
@@ -2146,14 +2311,23 @@ void map_load_config()
     map_draw_layer2 = pt.get<bool>("Layers.Layer2", map_draw_layer2);
     map_draw_layer3 = pt.get<bool>("Layers.Layer3", map_draw_layer3);
 
-    map_points_ignore_size = pt.get<bool>("Points.IgnoreSize", map_points_ignore_size);
+    map_draw_lines_layer0 = pt.get<bool>("Lines.Base",   map_draw_lines_layer0);
+    map_draw_lines_layer1 = pt.get<bool>("Lines.Layer1", map_draw_lines_layer1);
+    map_draw_lines_layer2 = pt.get<bool>("Lines.Layer2", map_draw_lines_layer2);
+    map_draw_lines_layer3 = pt.get<bool>("Lines.Layer3", map_draw_lines_layer3);
 
-    map_draw_points_coordinates = pt.get<bool>("Points.ShowCoordinates",  map_draw_points_coordinates);
-    map_draw_points_opaque      = pt.get<bool>("Points.OpaqueBackground", map_draw_points_opaque);
-    map_draw_points_layer0      = pt.get<bool>("Points.Base",             map_draw_points_layer0);
-    map_draw_points_layer1      = pt.get<bool>("Points.Layer1",           map_draw_points_layer1);
-    map_draw_points_layer2      = pt.get<bool>("Points.Layer2",           map_draw_points_layer2);
-    map_draw_points_layer3      = pt.get<bool>("Points.Layer3",           map_draw_points_layer3);
+    map_draw_points_layer0 = pt.get<bool>("Points.Base",   map_draw_points_layer0);
+    map_draw_points_layer1 = pt.get<bool>("Points.Layer1", map_draw_points_layer1);
+    map_draw_points_layer2 = pt.get<bool>("Points.Layer2", map_draw_points_layer2);
+    map_draw_points_layer3 = pt.get<bool>("Points.Layer3", map_draw_points_layer3);
+
+    map_lines_width          = pt.get<float>("Lines.Width",        map_lines_width);
+    map_lines_black_to_white = pt.get<bool> ("Lines.BlackToWhite", map_lines_black_to_white);
+
+    map_points_show_coordinates  = pt.get<bool>("Points.ShowCoordinates",  map_points_show_coordinates);
+    map_points_opaque_background = pt.get<bool>("Points.OpaqueBackground", map_points_opaque_background);
+    map_points_ignore_size       = pt.get<bool>("Points.IgnoreSize",       map_points_ignore_size);
+    map_points_black_to_white    = pt.get<bool>("Points.BlackToWhite",     map_points_black_to_white);
 
     map_draw_grid             = pt.get<bool>("Grid.Enabled",     map_draw_grid);
     map_draw_grid_coordinates = pt.get<bool>("Grid.Coordinates", map_draw_grid_coordinates);
@@ -2171,9 +2345,16 @@ void map_load_config()
 
 LRESULT CALLBACK window_proc_hook(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
+    int handled = 0;
+
+    static unsigned int s_PrevKeyDown = 0;
+    static int s_PrevKeyDownMod = 0;
+    static int s_PrevKeyDownHandled = 0;
+
     switch (message)
     {
         case WM_DROPFILES:
+        {
             HDROP drop = (HDROP)wparam;
 
             UINT drop_file = DragQueryFile(drop, 0xFFFFFFFF, NULL, NULL);
@@ -2193,7 +2374,7 @@ LRESULT CALLBACK window_proc_hook(HWND hwnd, UINT message, WPARAM wparam, LPARAM
             {
                 //MessageBoxA(hwnd, (LPCSTR)drop_filename, APPLICATION_NAME, MB_ICONINFORMATION);
 
-                std::string drop_filename_stdstring = (char*)drop_filename;
+                std::string drop_filename_stdstring = (char *)drop_filename;
 
                 if (string_contains(drop_filename_stdstring, ".txt") == true)
                 {
@@ -2214,43 +2395,239 @@ LRESULT CALLBACK window_proc_hook(HWND hwnd, UINT message, WPARAM wparam, LPARAM
 
                 if (string_contains(drop_filename_stdstring, ".png") == true)
                 {
-                    window_background_texture_file = drop_filename_stdstring;
+                    background_file = drop_filename_stdstring;
 
                     window_load_background_texture();
 
                     window_use_background_texture = true;
                 }
+
+                if (string_contains(drop_filename_stdstring, ".ttf") == true)
+                {
+                    font_file = drop_filename_stdstring;
+
+                    font_load();
+                }
             }
 
             DragFinish(drop);
             break;
+            }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+        case WM_CHAR:
+        case WM_SYSCHAR:
+        {
+            int key = (int)(wparam&0xff);
+            int kmod = 0;
+
+            if( GetAsyncKeyState(VK_SHIFT)<0 )
+                kmod |= TW_KMOD_SHIFT;
+            if( GetAsyncKeyState(VK_CONTROL)<0 )
+            {
+                kmod |= TW_KMOD_CTRL;
+                if( key>0 && key<27 )
+                    key += 'a'-1;
+            }
+            if( GetAsyncKeyState(VK_MENU)<0 )
+                kmod |= TW_KMOD_ALT;
+            if( key>0 && key<256 )
+                handled = TwKeyPressed(key, kmod);
+        }
+        break;
+        case WM_KEYDOWN:
+        case WM_SYSKEYDOWN:
+        {
+            int kmod = 0;
+            int testkp = 0;
+            int k = 0;
+
+            if( GetAsyncKeyState(VK_SHIFT)<0 )
+                kmod |= TW_KMOD_SHIFT;
+            if( GetAsyncKeyState(VK_CONTROL)<0 )
+            {
+                kmod |= TW_KMOD_CTRL;
+                testkp = 1;
+            }
+            if( GetAsyncKeyState(VK_MENU)<0 )
+            {
+                kmod |= TW_KMOD_ALT;
+                testkp = 1;
+            }
+            if( wparam>=VK_F1 && wparam<=VK_F15 )
+                k = TW_KEY_F1 + ((int)wparam-VK_F1);
+            else if( testkp && wparam>=VK_NUMPAD0 && wparam<=VK_NUMPAD9 )
+                k = '0' + ((int)wparam-VK_NUMPAD0);
+            else
+            {
+                switch( wparam )
+                {
+                case VK_UP:
+                    k = TW_KEY_UP;
+                    break;
+                case VK_DOWN:
+                    k = TW_KEY_DOWN;
+                    break;
+                case VK_LEFT:
+                    k = TW_KEY_LEFT;
+                    break;
+                case VK_RIGHT:
+                    k = TW_KEY_RIGHT;
+                    break;
+                case VK_INSERT:
+                    k = TW_KEY_INSERT;
+                    break;
+                case VK_DELETE:
+                    k = TW_KEY_DELETE;
+                    break;
+                case VK_PRIOR:
+                    k = TW_KEY_PAGE_UP;
+                    break;
+                case VK_NEXT:
+                    k = TW_KEY_PAGE_DOWN;
+                    break;
+                case VK_HOME:
+                    k = TW_KEY_HOME;
+                    break;
+                case VK_END:
+                    k = TW_KEY_END;
+                    break;
+                case VK_DIVIDE:
+                    if( testkp )
+                        k = '/';
+                    break;
+                case VK_MULTIPLY:
+                    if( testkp )
+                        k = '*';
+                    break;
+                case VK_SUBTRACT:
+                    if( testkp )
+                        k = '-';
+                    break;
+                case VK_ADD:
+                    if( testkp )
+                        k = '+';
+                    break;
+                case VK_DECIMAL:
+                    if( testkp )
+                        k = '.';
+                    break;
+                default:
+                    if( (kmod&TW_KMOD_CTRL) && (kmod&TW_KMOD_ALT) )
+                        k = MapVirtualKey( (UINT)wparam, 2 ) & 0x0000FFFF;
+                }
+            }
+            if( k!=0 )
+                handled = TwKeyPressed(k, kmod);
+            else
+            {
+                int key = (int)(wparam&0xff);
+                if( kmod&TW_KMOD_CTRL && key>0 && key<27 )
+                    key += 'a'-1;
+                if( key>0 && key<256 )
+                    handled = TwKeyTest(key, kmod);
+            }
+            s_PrevKeyDown = wparam;
+            s_PrevKeyDownMod = kmod;
+            s_PrevKeyDownHandled = handled;
+        }
+        break;
+        case WM_KEYUP:
+        case WM_SYSKEYUP:
+        {
+            int kmod = 0;
+            if( GetAsyncKeyState(VK_SHIFT)<0 )
+                kmod |= TW_KMOD_SHIFT;
+            if( GetAsyncKeyState(VK_CONTROL)<0 )
+                kmod |= TW_KMOD_CTRL;
+            if( GetAsyncKeyState(VK_MENU)<0 )
+                kmod |= TW_KMOD_ALT;
+            if( s_PrevKeyDown==wparam && s_PrevKeyDownMod==kmod )
+                handled = s_PrevKeyDownHandled;
+            else 
+            {
+                int key = (int)(wparam&0xff);
+                if( kmod&TW_KMOD_CTRL && key>0 && key<27 )
+                    key += 'a'-1;
+                if( key>0 && key<256 )
+                    handled = TwKeyTest(key, kmod);
+            }
+            s_PrevKeyDown = 0;
+            s_PrevKeyDownMod = 0;
+            s_PrevKeyDownHandled = 0;
+        }
+        break;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
     }
 
-    LRESULT result = CallWindowProc(window_proc_freeglut, hwnd, message, wparam, lparam);
+    LRESULT result = CallWindowProc(window_proc_normal, hwnd, message, wparam, lparam);
 
     return result;
 }
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
+    atexit(done);
+
+    //font_file = get_windows_font_file(FONT_NAME_DEFAULT);
+
     map_load_config();
 
-    glutInit(&argc, argv);
-    glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE);
+    if (!glfwInit())
+    {
+        message_box_show_error("Function glfwInit failed");
 
-    glutInitWindowSize(window_width, window_height);
-    glutInitWindowPosition
-    (
-        (glutGet(GLUT_SCREEN_WIDTH)  - window_width)  / 2,
-        (glutGet(GLUT_SCREEN_HEIGHT) - window_height) / 2
-    );
+        done();
 
-    window_id = glutCreateWindow(APPLICATION_NAME);
+        exit(EXIT_FAILURE);
+    }
 
-    window_hwnd = FindWindowA("FREEGLUT", APPLICATION_NAME);
+    GLFWmonitor *monitor = NULL;
 
-    window_proc_freeglut = (WNDPROC)GetWindowLongPtr(window_hwnd, GWLP_WNDPROC);
+    if (window_start_fullscreen == true)
+    {
+        monitor = glfwGetPrimaryMonitor();
 
+        window_is_fullscreen = true;
+    }
+
+    const GLFWvidmode *vidmode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+
+    if (window_start_fullscreen == true)
+    {
+        window_width  = vidmode->width;
+        window_height = vidmode->height;
+    }
+
+    window_object = glfwCreateWindow(window_width, window_height, APPLICATION_NAME, monitor, NULL);
+    if (!window_object)
+    {
+        message_box_show_error("Function glfwCreateWindow failed");
+
+        done();
+
+        exit(EXIT_FAILURE);
+    }
+
+    glfwMakeContextCurrent(window_object);
+
+    if (window_start_fullscreen == false)
+    {
+        //glfwSetWindowSize(window, window_width, window_height);
+        glfwSetWindowPos
+        (
+            window_object,
+            (vidmode->width  - window_width)  / 2,
+            (vidmode->height - window_height) / 2
+        );
+    }
+
+    window_hwnd = glfwGetWin32Window(window_object);
+
+    window_proc_normal = (WNDPROC)GetWindowLongPtr(window_hwnd, GWLP_WNDPROC);
     SetWindowLongPtr(window_hwnd, GWLP_WNDPROC, (LONG_PTR)window_proc_hook);
 
     DragAcceptFiles(window_hwnd, true);
@@ -2260,30 +2637,21 @@ int main(int argc, char** argv)
         ShowWindow(window_hwnd, SW_MAXIMIZE);
     }
 
-    if (window_start_fullscreen == true)
-    {
-        glutFullScreen();
-    }
+    glfwSetErrorCallback(error_callback);
 
-    glutDisplayFunc(render);
-    //glutIdleFunc(idle);
-    glutReshapeFunc(reshape);
-    glutKeyboardFunc(keyboard);
-    glutSpecialFunc(special);
-    glutMouseFunc(mouse);
-    glutMouseWheelFunc(mouse_wheel);
-    glutMotionFunc(motion);
-    glutPassiveMotionFunc((GLUTmousemotionfun)TwEventMouseMotionGLUT);
+    glfwSetWindowSizeCallback (window_object, window_size_callback);
+    //glfwSetKeyCallback        (window_object, key_callback);
+    //glfwSetCharCallback       (window_object, char_callback);
+    glfwSetMouseButtonCallback(window_object, mouse_button_callback);
+    glfwSetScrollCallback     (window_object, scroll_callback);
+    glfwSetCursorPosCallback  (window_object, cursor_pos_callback);
 
-    atexit(done);
-
-    init_gl();
+    init();
 
     TwInit(TW_OPENGL, NULL);
 
     TwCopyStdStringToClientFunc(CopyStdStringToClient);
     TwHandleErrors(bar_error_handler);
-    TwGLUTModifiersFunc(glutGetModifiers);
 
     TwDefine(" GLOBAL fontsize=2 contained=true help='EverQuest Map Viewer' ");
 
@@ -2310,11 +2678,18 @@ int main(int argc, char** argv)
 
         if (string_contains(argv[1], ".png") == true)
         {
-            window_background_texture_file = argv[1];
+            background_file = argv[1];
 
             window_use_background_texture = true;
         }
+
+        if (string_contains(argv[1], ".ttf") == true)
+        {
+            font_file = argv[1];
+        }
     }
+
+    font_load();
 
     window_load_background_texture();
 
@@ -2322,7 +2697,23 @@ int main(int argc, char** argv)
 
     last_tick = GetTickCount();
 
-    glutMainLoop();
+    while (!glfwWindowShouldClose(window_object))
+    {
+        render();
+
+        if (map_zoom_to_fit == true)
+        {
+            glfwPollEvents();
+        }
+        else
+        {
+            glfwWaitEvents();
+        }
+    }
+
+    done();
+
+    exit(EXIT_SUCCESS);
 
     return 0;
 }
