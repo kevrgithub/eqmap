@@ -7,6 +7,7 @@
 #include <vector>
 #include <string>
 #include <sstream>
+#include <algorithm>
 #include <iomanip>
 #include <cassert>
 
@@ -57,7 +58,7 @@
 // https://bitbucket.org/SpartanJ/soil2
 #include "SOIL2.h"
 
-#define APPLICATION_NAME "eqmap"
+#define APPLICATION_NAME "EverQuest Map Viewer"
 
 std::string ini_file = "eqmap.ini";
 
@@ -108,6 +109,9 @@ double mouse_y = 0;
 
 bool mouse_dragging = false;
 
+bool mouse4_pressed = false;
+bool mouse5_pressed = false;
+
 double mouse_dragging_start_x = 0;
 double mouse_dragging_start_y = 0;
 
@@ -155,6 +159,19 @@ float map_grid_size = 100;
 
 float map_grid_color[3] = {1.0, 0.0, 0.0};
 
+enum map_grid_line_stipple_t
+{
+    MAP_GRID_LINE_STIPPLE_TYPE_DOTTED        = 0x0101,
+    MAP_GRID_LINE_STIPPLE_TYPE_DASHED        = 0x00FF,
+    MAP_GRID_LINE_STIPPLE_TYPE_DASH_DOT_DASH = 0x1C47
+};
+
+int map_grid_line_stipple_factor = 1;
+
+int map_grid_line_stipple_type = MAP_GRID_LINE_STIPPLE_TYPE_DASH_DOT_DASH;
+
+int map_grid_line_stipple_type_config = 3;
+
 bool map_draw_info_text = true;
 
 bool map_draw_lines  = true;
@@ -201,7 +218,7 @@ std::string fonts_folder = "fonts";
 
 std::string font_file = "c:/windows/fonts/arial.ttf";
 
-int font_size  = 11;
+int font_size  = 10;
 int font_size1 = 11;
 int font_size2 = 12;
 int font_size3 = 18;
@@ -397,7 +414,15 @@ void draw_string(FTFont* font, int size, float x, float y, std::string text)
 
     glRasterPos2f(x, y);
 
+    //glPushMatrix();
+    //glTranslatef(x, y, 0);
+    //glScalef(1, -1, 1);
+
     font->Render(text.c_str());
+
+    //glScalef(1, 1, 1);
+    //glTranslatef(-x, -y, 0);
+    //glPopMatrix();
 }
 
 void draw_string_background(FTFont* font, int size, float x, float y, std::string text)
@@ -454,6 +479,11 @@ void font_load()
     }
 */
 
+    if (string_contains(font_file, ".ttf") == false)
+    {
+        return;
+    }
+
     if (file_exists(font_file) == false)
     {
         font_file = get_windows_font_file(FONT_NAME_DEFAULT);
@@ -506,6 +536,54 @@ void window_load_background_texture()
         SOIL_CREATE_NEW_ID,
         SOIL_FLAG_COMPRESS_TO_DXT //| SOIL_FLAG_INVERT_Y
     );
+}
+
+void window_save_screenshot()
+{
+    int i = 0;
+    
+    while (true)
+    {
+        std::stringstream screenshot_index;
+        screenshot_index << std::setw(6) << std::setfill('0') << i;
+
+        std::stringstream screenshot_filename;
+        screenshot_filename << "eqmap" << screenshot_index.str() << ".png";
+
+        if (file_exists(screenshot_filename.str()) == false)
+        {
+            int screenshot_result = SOIL_save_screenshot
+            (
+                screenshot_filename.str().c_str(),
+                SOIL_SAVE_TYPE_PNG,
+                0, 0, window_width, window_height
+            );
+
+            break;
+        }
+
+        i++;
+    }
+
+    Sleep(1000);
+}
+
+void window_set_border(HWND hwnd, bool b)
+{
+    LONG window_style = GetWindowLong(hwnd, GWL_STYLE);
+
+    if (b == true)
+    {
+        window_style |= (WS_CAPTION | WS_THICKFRAME);
+    }
+    else
+    {
+        window_style &= ~(WS_CAPTION | WS_THICKFRAME);
+    }
+
+    SetWindowLongPtr(hwnd, GWL_STYLE, window_style);
+
+    SetWindowPos(hwnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER);
 }
 
 void map_center()
@@ -1109,6 +1187,30 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
             map_center();
         }
 
+        if (button == GLFW_MOUSE_BUTTON_4)
+        {
+            if (action == GLFW_PRESS)
+            {
+                mouse4_pressed = true;
+            }
+            else
+            {
+                mouse4_pressed = false;
+            }
+        }
+
+        if (button == GLFW_MOUSE_BUTTON_5)
+        {
+            if (action == GLFW_PRESS)
+            {
+                mouse5_pressed = true;
+            }
+            else
+            {
+                mouse5_pressed = false;
+            }
+        }
+
     }
 }
 
@@ -1122,13 +1224,40 @@ static void scroll_callback(GLFWwindow* window, double x, double y)
     if (!result)
     {
 
-        if (y > 0)
+        if (mouse4_pressed == true)
         {
-            map_zoom_in();
+            if (y > 0)
+            {
+                map_max_z += 1;
+            }
+            else
+            {
+                map_max_z -= 1;
+            }
         }
-        else
+
+        if (mouse5_pressed == true)
         {
-            map_zoom_out();
+            if (y > 0)
+            {
+                map_min_z += 1;
+            }
+            else
+            {
+                map_min_z -= 1;
+            }
+        }
+
+        if (mouse4_pressed == false && mouse5_pressed == false)
+        {
+            if (y > 0)
+            {
+                map_zoom_in();
+            }
+            else
+            {
+                map_zoom_out();
+            }
         }
 
     }
@@ -1409,7 +1538,7 @@ void render()
 
         glEnable(GL_LINE_STIPPLE);
 
-        glLineStipple(1, 0x1C47);
+        glLineStipple(map_grid_line_stipple_factor, map_grid_line_stipple_type);
 
         //glBegin(GL_LINES);
 
@@ -1879,6 +2008,11 @@ void TW_CALL bar_error_handler(const char *error_message)
     anttweakbar_last_error = error_message;
 }
 
+void TW_CALL bar_options_button_save_screenshot(void *)
+{
+    window_save_screenshot();
+}
+
 /*
 void TW_CALL bar_options_button_toggle_fullscreen(void *)
 {
@@ -1999,6 +2133,30 @@ void bar_zones_create()
 
     void *vp;
 
+    std::vector<std::string> zone_short_names;
+
+    foreach (zone_info_t zone_info, zone_infos)
+    {
+        zone_short_names.push_back(zone_info.name_short);
+    }
+
+    std::sort(zone_short_names.begin(), zone_short_names.end());
+
+    foreach (std::string zone_short_name, zone_short_names)
+    {
+        vp = static_cast<void *>(new std::string(zone_short_name));
+
+        std::stringstream button_name;
+        button_name << "ZoneButton_" << zone_short_name << "_ShortNames";
+
+        std::stringstream button_def;
+        button_def << " label='" << zone_short_name << "' group=ShortNames";
+
+        TwAddButton(bar_zones, button_name.str().c_str(), bar_zones_button_zone_name, vp, button_def.str().c_str());
+    }
+
+    TwDefine(" Zones/ShortNames label='Short Names' opened=false ");
+
     foreach (zone_info_t zone_info, zone_infos)
     {
         bool skip_zone = false;
@@ -2058,6 +2216,8 @@ void bar_options_create()
         " group=Window label='Width: ' help='Width of the map window' ");
     TwAddVarRO(bar_options, "WindowHeight", TW_TYPE_UINT32, &window_height,
         " group=Window label='Height: ' help='Height of the map window' ");
+    TwAddButton(bar_options, "SaveScreenshot", bar_options_button_save_screenshot, NULL,
+        " group=Window label='Save Screenshot' help='Save a screenshot of the window to file' key='F9' ");
 /*
     TwAddButton(bar_options, "ToggleFullscreen", bar_options_button_toggle_fullscreen, NULL,
         " group=Window label='Toggle Fullscreen' help='Switch between windowed mode and fullscreen mode' key='F11' ");
@@ -2074,7 +2234,6 @@ void bar_options_create()
         " group=Font label='Point Size 2: ' help='Size of drawn text for points' min=1 ");
     TwAddVarRW(bar_options, "FontSize3", TW_TYPE_INT32, &font_size3,
         " group=Font label='Point Size 3: ' help='Size of drawn text for points' min=1 ");
-    TwAddSeparator(bar_options, NULL, " group=Bounds ");
 
     TwDefine(" Options/Font group=Window ");
 
@@ -2241,9 +2400,24 @@ void bar_options_create()
         TwAddVarRW(bar_options, "MapDrawGridCoordinates", TW_TYPE_BOOLCPP, &map_draw_grid_coordinates,
         " group=Grid label='Coordinates' help='Draw the grid coordinates' key='G' ");
     TwAddVarRW(bar_options, "MapGridSize", TW_TYPE_FLOAT, &map_grid_size,
-        " group=Grid label='Size: ' help='Interval between grid lines and coordinates' min=1 precision=0 ");
+        " group=Grid label='Size: ' help='Interval between grid lines and coordinates' min=10 precision=0 ");
     TwAddVarRW(bar_options, "MapGridColor", TW_TYPE_COLOR3F, &map_grid_color,
         " group=Grid label='Color: ' help='Change the color of the grid' ");
+
+    TwAddVarRW(bar_options, "MapGridLineStippleFactor", TW_TYPE_INT32, &map_grid_line_stipple_factor,
+        " group=Grid label='Line Stipple Factor: ' help='Change the appearance of the grid lines' min=1 ");
+
+    TwEnumVal map_grid_line_stipple_tw_ev[] =
+    {
+        {MAP_GRID_LINE_STIPPLE_TYPE_DOTTED,        "Dotted"},
+        {MAP_GRID_LINE_STIPPLE_TYPE_DASHED,        "Dashed"},
+        {MAP_GRID_LINE_STIPPLE_TYPE_DASH_DOT_DASH, "Dash Dot Dash"}
+    };
+
+    TwType map_grid_line_stipple_tw_type = TwDefineEnum("MapGridLineStippleTypeEnum", map_grid_line_stipple_tw_ev, 3);
+
+    TwAddVarRW(bar_options, "MapGridLineStippleType", map_grid_line_stipple_tw_type, &map_grid_line_stipple_type,
+        " group=Grid label='Line Stipple Type: ' help='Change the appearance of the grid lines' ");
 
     TwDefine(" Options/Grid group=Map ");
 
@@ -2339,6 +2513,26 @@ void map_load_config()
     map_grid_color[0] /= 256;
     map_grid_color[1] /= 256;
     map_grid_color[2] /= 256;
+
+    map_grid_line_stipple_factor = pt.get<int>("Grid.LineStippleFactor", map_grid_line_stipple_factor);
+
+    map_grid_line_stipple_type_config = pt.get<int>("Grid.LineStippleType", map_grid_line_stipple_type_config);
+
+    switch (map_grid_line_stipple_type_config)
+    {
+        case 1:
+            map_grid_line_stipple_type = MAP_GRID_LINE_STIPPLE_TYPE_DOTTED;
+            break;
+
+        case 2:
+            map_grid_line_stipple_type = MAP_GRID_LINE_STIPPLE_TYPE_DOTTED;
+            break;
+
+        case 3:
+        default:
+            map_grid_line_stipple_type = MAP_GRID_LINE_STIPPLE_TYPE_DASH_DOT_DASH;
+            break;
+    }
 
     backgrounds_folder = pt.get<std::string>("Backgrounds.Folder", backgrounds_folder);
 }
